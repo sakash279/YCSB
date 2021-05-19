@@ -27,8 +27,8 @@ LICENSE file.
     <relativePath>../binding-parent</relativePath>
   </parent>
 
-  <artifactId>cassandra-binding</artifactId>
-  <name>Cassandra 2.1+ DB Binding</name>
+  <artifactId>cassandra-cosmosv3-binding</artifactId>
+  <name>Cassandra CosmosDB V3 extensions 2.1+ DB Binding</name>
   <packaging>jar</packaging>
 
   <properties>
@@ -41,13 +41,18 @@ LICENSE file.
     <dependency>
       <groupId>com.datastax.cassandra</groupId>
       <artifactId>cassandra-driver-core</artifactId>
-      <version>${cassandra.cql.version}</version>
+      <version>3.8.0</version>
     </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>core</artifactId>
       <version>${project.version}</version>
       <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.microsoft.azure</groupId>
+      <artifactId>azure-cosmos-cassandra-extensions</artifactId>
+      <version>0.14.0</version>
     </dependency>
     <dependency>
       <groupId>org.cassandraunit</groupId>
@@ -76,42 +81,6 @@ LICENSE file.
 	    <type>zip</type>
 	    <scope>test</scope>
 	  </dependency>
-      <dependency>
-          <groupId>com.microsoft.azure</groupId>
-          <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-          <version>0.18.0-SNAPSHOT</version>
-          <scope>compile</scope>
-      </dependency>
-    <dependency>
-      <groupId>com.microsoft.azure</groupId>
-      <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-      <version>0.18.0-SNAPSHOT</version>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.microsoft.azure</groupId>
-      <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-      <version>0.18.0-SNAPSHOT</version>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.microsoft.azure</groupId>
-      <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-      <version>0.18.0-SNAPSHOT</version>
-      <scope>compile</scope>
-    </dependency>
-      <dependency>
-          <groupId>com.microsoft.azure</groupId>
-          <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-          <version>0.18.0-SNAPSHOT</version>
-          <scope>compile</scope>
-      </dependency>
-    <dependency>
-      <groupId>com.microsoft.azure</groupId>
-      <artifactId>azure-cosmos-cassandra-extensions</artifactId>
-      <version>0.18.0-SNAPSHOT</version>
-      <scope>compile</scope>
-    </dependency>
   </dependencies>
 
   <profiles>
