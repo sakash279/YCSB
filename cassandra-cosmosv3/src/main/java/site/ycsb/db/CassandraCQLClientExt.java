@@ -179,20 +179,29 @@ public class CassandraCQLClientExt extends DB {
             DEFAULT_USE_SSL_CONNECTION));
 
         if ((username != null) && !username.isEmpty()) {
-          Cluster.Builder clusterBuilder = Cluster.builder().withCredentials(username, password)
-              .withPort(Integer.valueOf(port)).addContactPoints(hosts);
-          clusterBuilder = Cluster.builder().withLoadBalancingPolicy(CosmosLoadBalancingPolicy);
+
+          final Cluster.Builder clusterBuilder = Cluster.builder()
+              .addContactPoints(hosts)
+              .withPort(Integer.parseUnsignedInt(port))
+              .withCredentials(username, password)
+              .withLoadBalancingPolicy(CosmosLoadBalancingPolicy.builder().withGlobalEndpoint(hosts[0]).build());
+
           if (useSSL) {
-            clusterBuilder = clusterBuilder.withSSL();
-          } 
+            clusterBuilder.withSSL();
+          }
+
           cluster = clusterBuilder.build();
+
         } else {
-          cluster = Cluster.builder().withPort(Integer.valueOf(port))
-              .addContactPoints(hosts).build();
+
+          cluster = Cluster.builder()
+              .addContactPoints(hosts)
+              .withPort(Integer.parseUnsignedInt(port))
+              .build();
         }
 
-        String maxConnections = getProperties().getProperty(
-            MAX_CONNECTIONS_PROPERTY);
+        String maxConnections = getProperties().getProperty(MAX_CONNECTIONS_PROPERTY);
+
         if (maxConnections != null) {
           cluster.getConfiguration().getPoolingOptions()
               .setMaxConnectionsPerHost(HostDistance.LOCAL,
@@ -637,5 +646,4 @@ public class CassandraCQLClientExt extends DB {
 
     return Status.ERROR;
   }
-
 }
