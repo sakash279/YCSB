@@ -24,6 +24,7 @@
 
 recordcount=1000
 operationcount=1000
+threadcount=5
 workload=site.ycsb.workloads.CoreWorkload
 
 readallfields=true
@@ -33,13 +34,22 @@ updateproportion=0.5
 scanproportion=0
 insertproportion=0
 
+# Cassandra related configurations
 port=10350
-cassandra.keyspace=ycsb
-table=usertable
-fieldcount=3
+
+cassandra.maxconnections=1
+cassandra.coreconnections=1
+cassandra.connecttimeoutmillis=5000
+cassandra.readtimeoutmillis=12000
+cassandra.readconsistencylevel=QUORUM
+cassandra.writeconsistencylevel=QUORUM
+cassandra.tracing=false
 cassandra.useSSL=true
+cassandra.cosmosdbthroughput=6000
 
-
+#cassandra.keyspace=ycsb
+#table=usertable2
+fieldcount=3
 
 requestdistribution=zipfian
 
