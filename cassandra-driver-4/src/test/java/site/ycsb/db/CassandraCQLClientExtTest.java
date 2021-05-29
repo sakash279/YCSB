@@ -1,16 +1,16 @@
 /**
- * Copyright (c) 2015 YCSB contributors All rights reserved.
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
- * the License. You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
- * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations under the License. See accompanying LICENSE file.
+ * Copyright (c) 2015 YCSB contributors All rights reserved. Licensed under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+ * either express or implied. See the License for the specific language governing permissions and limitations under the
+ * License. See accompanying LICENSE file.
  */
 
 package site.ycsb.db;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
@@ -19,18 +19,20 @@ import com.datastax.oss.driver.api.querybuilder.relation.Relation;
 import com.datastax.oss.driver.api.querybuilder.select.Select;
 import com.datastax.oss.driver.api.querybuilder.truncate.Truncate;
 import com.google.common.collect.Sets;
-import org.cassandraunit.CassandraCQLUnit;
-import org.cassandraunit.dataset.cql.ClassPathCQLDataSet;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
+import org.junit.runner.Description;
+import org.junit.runners.model.Statement;
 import site.ycsb.ByteIterator;
 import site.ycsb.Status;
 import site.ycsb.StringByteIterator;
 import site.ycsb.measurements.Measurements;
 import site.ycsb.workloads.CoreWorkload;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -38,6 +40,7 @@ import java.util.Set;
 
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.insertInto;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.literal;
+import static java.util.Objects.requireNonNull;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.hasSize;
@@ -52,17 +55,11 @@ public class CassandraCQLClientExtTest {
 
   // region Fields
 
-  private final static String DEFAULT_ROW_KEY = "user1";
-  private final static String HOST = "localhost";
-  private final static int PORT = 9142;
-  private final static String TABLE = "users";
-
-  // Change the default Cassandra timeout from 10s to 120s for slow CI machines
-  private final static long timeout = 120_000L;
-
   @ClassRule
-  public static CassandraCQLUnit cassandraUnit = new CassandraCQLUnit(
-      new ClassPathCQLDataSet("ycsb.cql", "ycsb"), null, timeout);
+  public static CassandraUnit cassandraUnit = new CassandraUnit(System.getProperty("cassandra.driver-4.config-file"));
+
+  private static final String DEFAULT_ROW_KEY = "integration_test";
+  private static final String TABLE = "users";
 
   private CassandraCQLClientExt client;
   private CqlSession session;
@@ -85,16 +82,18 @@ public class CassandraCQLClientExtTest {
 
     this.session = cassandraUnit.getSession();
 
-    final Properties p = new Properties();
-    p.setProperty("hosts", HOST);
-    p.setProperty("port", Integer.toString(PORT));
-    p.setProperty("table", TABLE);
+    final Properties properties = new Properties();
 
-    Measurements.setProperties(p);
+    properties.setProperty("config-file", cassandraUnit.configurationFile.toString());
+    properties.setProperty("table", TABLE);
+
+    Measurements.setProperties(properties);
+
     final CoreWorkload workload = new CoreWorkload();
-    workload.init(p);
+    workload.init(properties);
+
     this.client = new CassandraCQLClientExt();
-    this.client.setProperties(p);
+    this.client.setProperties(properties);
     this.client.init();
   }
 
@@ -244,12 +243,59 @@ public class CassandraCQLClientExtTest {
   // region Privates
 
   private void insertRow() {
-    final Insert insertStmt = insertInto(TABLE)
+    final Insert insert = insertInto(TABLE)
         .value(CassandraCQLClientExt.YCSB_KEY, literal(DEFAULT_ROW_KEY))
         .value("field0", literal("value1"))
         .value("field1", literal("value2"));
-    this.session.execute(insertStmt.build());
+    this.session.execute(insert.build());
   }
 
   // endregion
+
+  private static class CassandraUnit implements TestRule {
+
+    final File configurationFile;
+    CqlSession session;
+
+    CassandraUnit(final String configurationFileName) {
+      requireNonNull(configurationFileName, "expected non-null configurationFileName");
+      this.session = null;
+      this.configurationFile = new File(configurationFileName);
+      assertThat(this.configurationFile.exists(), is(true));
+    }
+
+    @Override
+    public Statement apply(final Statement base, final Description description) {
+      return new Statement() {
+        @Override
+        public void evaluate() throws Throwable {
+          CassandraUnit.this.before();
+          try {
+            CassandraUnit.this.before();
+          } finally {
+            CassandraUnit.this.after();
+          }
+        }
+      };
+    }
+
+    CqlSession getSession() {
+      throw new UnsupportedOperationException();
+    }
+
+    private void after() {
+      if (this.session != null) {
+        this.session.close();
+        this.session = null;
+      }
+    }
+
+    private void before() {
+      this.after();
+      this.session = CqlSession.builder()
+          .withConfigLoader(DriverConfigLoader.fromFile(this.configurationFile))
+          .withApplicationName("ycsb.cassandra.driver-4.integration-test")
+          .build();
+    }
+  }
 }

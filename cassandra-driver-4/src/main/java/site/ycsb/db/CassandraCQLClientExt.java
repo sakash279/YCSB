@@ -63,16 +63,16 @@ import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.selectFrom;
 public class CassandraCQLClientExt extends DB {
 
   public static final String APPLICATION_CONFIGURATION_FILE_DEFAULT = "application.conf";
-  public static final String APPLICATION_CONFIGURATION_FILE_PROPERTY = "cassandra.driver-4.configuration-file";
+  public static final String APPLICATION_CONFIGURATION_FILE_PROPERTY = "config-file";
 
   public static final String EXECUTION_TRACING_DEFAULT = "false";
-  public static final String EXECUTION_TRACING_PROPERTY = "cassandra.driver-4.execution-tracing";
+  public static final String EXECUTION_TRACING_PROPERTY = "execution-tracing";
 
   public static final String READ_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
-  public static final String READ_CONSISTENCY_LEVEL_PROPERTY = "cassandra.driver-4.read-consistency-level";
+  public static final String READ_CONSISTENCY_LEVEL_PROPERTY = "read-consistency-level";
 
   public static final String WRITE_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
-  public static final String WRITE_CONSISTENCY_LEVEL_PROPERTY = "cassandra.driver-4.write-consistency-level";
+  public static final String WRITE_CONSISTENCY_LEVEL_PROPERTY = "write-consistency-level";
 
   public static final String YCSB_KEY = "y_id";
 
