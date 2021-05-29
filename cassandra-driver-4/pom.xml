@@ -60,8 +60,7 @@ LICENSE file.
     <dependency>
       <groupId>org.cassandraunit</groupId>
       <artifactId>cassandra-unit</artifactId>
-      <version>3.0.0.1</version>
-      <classifier>shaded</classifier>
+      <version>4.3.1.0</version>
       <scope>test</scope>
     </dependency>
     <dependency>

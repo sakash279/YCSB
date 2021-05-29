@@ -13,14 +13,20 @@ import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
-import com.datastax.oss.driver.api.core.cql.BoundStatement;
+import com.datastax.oss.driver.api.core.cql.ColumnDefinition;
 import com.datastax.oss.driver.api.core.cql.ColumnDefinitions;
-import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
-import com.datastax.oss.driver.api.core.session.Session;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
-import com.datastax.oss.driver.api.querybuilder.insert.RegularInsert;
+import com.datastax.oss.driver.api.querybuilder.delete.Delete;
+import com.datastax.oss.driver.api.querybuilder.insert.Insert;
+import com.datastax.oss.driver.api.querybuilder.relation.Relation;
+import com.datastax.oss.driver.api.querybuilder.select.Select;
+import com.datastax.oss.driver.api.querybuilder.update.Assignment;
+import com.datastax.oss.driver.api.querybuilder.update.Update;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
@@ -41,6 +47,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.bindMarker;
+import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.selectFrom;
 
 /**
  * Cassandra 2.x CQL client using DataStax Java Driver 4 with Cosmos Cassandra extensions.
@@ -54,23 +65,34 @@ public class CassandraCQLClientExt extends DB {
   public static final String APPLICATION_CONFIGURATION_FILE_DEFAULT = "application.conf";
   public static final String APPLICATION_CONFIGURATION_FILE_PROPERTY = "cassandra.driver-4.configuration-file";
 
+  public static final String EXECUTION_TRACING_DEFAULT = "false";
+  public static final String EXECUTION_TRACING_PROPERTY = "cassandra.driver-4.execution-tracing";
+
+  public static final String READ_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
+  public static final String READ_CONSISTENCY_LEVEL_PROPERTY = "cassandra.driver-4.read-consistency-level";
+
+  public static final String WRITE_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
+  public static final String WRITE_CONSISTENCY_LEVEL_PROPERTY = "cassandra.driver-4.write-consistency-level";
+
   public static final String YCSB_KEY = "y_id";
 
   static final Logger LOG = LoggerFactory.getLogger(CassandraCQLClientExt.class);
-  private static final AtomicReference<PreparedStatement> DELETE_STMT = new AtomicReference<>();
+  private static final AtomicReference<Delete> DELETE_STATEMENT = new AtomicReference<>();
+
   /**
    * Count the number of times initialized to teardown on the last {@link #cleanup()}.
    */
   private static final AtomicInteger INIT_COUNT = new AtomicInteger();
-  private static final ConcurrentMap<Set<String>, PreparedStatement> INSERT_STMTS = new ConcurrentHashMap<>();
-  private static final AtomicReference<PreparedStatement> READ_ALL_STMT = new AtomicReference<>();
-  private static final ConcurrentMap<Set<String>, PreparedStatement> READ_STMTS = new ConcurrentHashMap<>();
-  private static final AtomicReference<PreparedStatement> SCAN_ALL_STMT = new AtomicReference<>();
-  private static final ConcurrentMap<Set<String>, PreparedStatement> SCAN_STMTS = new ConcurrentHashMap<>();
-  private static final ConcurrentMap<Set<String>, PreparedStatement> UPDATE_STMTS = new ConcurrentHashMap<>();
+  private static final ConcurrentMap<Set<String>, Insert> INSERT_STATEMENTS = new ConcurrentHashMap<>();
+  private static final AtomicReference<Select> READ_ALL_STATEMENT = new AtomicReference<>();
+  private static final ConcurrentMap<Set<String>, Select> READ_STATEMENTS = new ConcurrentHashMap<>();
+  private static final AtomicReference<Select> SCAN_ALL_STATEMENT = new AtomicReference<>();
+  private static final ConcurrentMap<Set<String>, Select> SCAN_STATEMENTS = new ConcurrentHashMap<>();
+  private static final ConcurrentMap<Set<String>, Update> UPDATE_STATEMENTS = new ConcurrentHashMap<>();
 
   private static ConsistencyLevel readConsistencyLevel = ConsistencyLevel.QUORUM;
-  private static Session session = null;
+  private static boolean executionTracing = false;
+  private static CqlSession session = null;
   private static ConsistencyLevel writeConsistencyLevel = ConsistencyLevel.QUORUM;
 
   /**
@@ -81,13 +103,13 @@ public class CassandraCQLClientExt extends DB {
     synchronized (INIT_COUNT) {
       final int currentInitCount = INIT_COUNT.decrementAndGet();
       if (currentInitCount <= 0) {
-        READ_STMTS.clear();
-        SCAN_STMTS.clear();
-        INSERT_STMTS.clear();
-        UPDATE_STMTS.clear();
-        READ_ALL_STMT.set(null);
-        SCAN_ALL_STMT.set(null);
-        DELETE_STMT.set(null);
+        READ_STATEMENTS.clear();
+        SCAN_STATEMENTS.clear();
+        INSERT_STATEMENTS.clear();
+        UPDATE_STATEMENTS.clear();
+        READ_ALL_STATEMENT.set(null);
+        SCAN_ALL_STATEMENT.set(null);
+        DELETE_STATEMENT.set(null);
         session.close();
         session = null;
       }
@@ -110,31 +132,24 @@ public class CassandraCQLClientExt extends DB {
   public Status delete(final String table, final String key) {
 
     try {
-      PreparedStatement stmt = DELETE_STMT.get();
 
-      // Prepare statement on demand
-      if (stmt == null) {
-        stmt = session.prepare(QueryBuilder.delete().from(table)
-            .where(QueryBuilder.eq(YCSB_KEY, QueryBuilder.bindMarker())));
-        stmt.setConsistencyLevel(writeConsistencyLevel);
-        if (trace) {
-          stmt.enableTracing();
-        }
+      final Delete delete = DELETE_STATEMENT.updateAndGet(prior -> prior == null
+          ? QueryBuilder.deleteFrom(table).whereColumn(YCSB_KEY).isEqualTo(bindMarker())
+          : prior);
 
-        final PreparedStatement prevStmt = DELETE_STMT.getAndSet(stmt);
-        if (prevStmt != null) {
-          stmt = prevStmt;
-        }
-      }
+      LOG.debug("statement: {}}, key: {}", delete, key);
 
-      LOG.debug(stmt.getQueryString());
-      LOG.debug("key = {}", key);
+      final SimpleStatement statement = delete.builder()
+          .setConsistencyLevel(writeConsistencyLevel)
+          .setTracing(executionTracing)
+          .addPositionalValue(key)
+          .build();
 
-      session.execute(stmt.bind(key));
-
+      session.execute(statement);
       return Status.OK;
-    } catch (final Exception e) {
-      LOG.error(MessageFormatter.format("Error deleting key: {}", key).getMessage(), e);
+
+    } catch (final Exception error) {
+      LOG.error(MessageFormatter.format("Error deleting key: {}", key).getMessage(), error);
     }
 
     return Status.ERROR;
@@ -163,13 +178,17 @@ public class CassandraCQLClientExt extends DB {
             APPLICATION_CONFIGURATION_FILE_PROPERTY,
             APPLICATION_CONFIGURATION_FILE_DEFAULT));
 
+        executionTracing = Boolean.getBoolean(this.getProperties().getProperty(
+            EXECUTION_TRACING_PROPERTY,
+            EXECUTION_TRACING_DEFAULT));
+
         readConsistencyLevel = DefaultConsistencyLevel.valueOf(this.getProperties().getProperty(
             READ_CONSISTENCY_LEVEL_PROPERTY,
-            READ_CONSISTENCY_LEVEL_PROPERTY_DEFAULT));
+            READ_CONSISTENCY_LEVEL_DEFAULT));
 
         writeConsistencyLevel = DefaultConsistencyLevel.valueOf(this.getProperties().getProperty(
             WRITE_CONSISTENCY_LEVEL_PROPERTY,
-            WRITE_CONSISTENCY_LEVEL_PROPERTY_DEFAULT));
+            WRITE_CONSISTENCY_LEVEL_DEFAULT));
 
         session = CqlSession.builder()
             .withClassLoader(ClassLoader.getSystemClassLoader())
@@ -195,62 +214,49 @@ public class CassandraCQLClientExt extends DB {
    *
    * @param table  The name of the table
    * @param key    The record key of the record to insert.
-   * @param values A HashMap of field/value pairs to insert in the record
+   * @param namedValues A HashMap of field/value pairs to insert in the record
    *
    * @return Zero on success, a non-zero error code on error
    */
   @Override
-  public Status insert(final String table, final String key, final Map<String, ByteIterator> values) {
+  public Status insert(final String table, final String key, final Map<String, ByteIterator> namedValues) {
 
     try {
 
-      final Set<String> fields = values.keySet();
-      PreparedStatement stmt = INSERT_STMTS.get(fields);
+      final Set<String> fields = namedValues.keySet();
+      Insert insert = INSERT_STATEMENTS.get(fields);
 
-      // Prepare statement on demand
+      if (insert == null) {
 
-      if (stmt == null) {
+        insert = QueryBuilder.insertInto(table)
+            .value(YCSB_KEY, bindMarker())
+            .values(fields.stream().collect(Collectors.toMap(Function.identity(), name -> bindMarker())));
 
-        RegularInsert insertInto = QueryBuilder.insertInto(table).value(YCSB_KEY, QueryBuilder.bindMarker());
+        final Insert prior = INSERT_STATEMENTS.putIfAbsent(new HashSet<>(fields), insert);
 
-        for (final String field : fields) {
-          insertInto = insertInto.value(field, QueryBuilder.bindMarker());
-        }
-
-        stmt = session.prepare(insertInto);
-        stmt.setConsistencyLevel(writeConsistencyLevel);
-        if (trace) {
-          stmt.enableTracing();
-        }
-
-        final PreparedStatement prevStmt = INSERT_STMTS.putIfAbsent(new HashSet(fields), stmt);
-        if (prevStmt != null) {
-          stmt = prevStmt;
+        if (prior != null) {
+          insert = prior;
         }
       }
 
       if (LOG.isDebugEnabled()) {
-        LOG.debug(stmt.getQueryString());
-        LOG.debug("key = {}", key);
-        for (final Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-          LOG.debug("{} = {}", entry.getKey(), entry.getValue());
-        }
+        LOG.debug("statement: {}, key: {}, values: {}", insert.asCql(), key, namedValues);
       }
 
-      // Add key
-      final BoundStatement boundStmt = stmt.bind().setString(0, key);
+      // TODO (DANOBLE) verify that the order of names and values are the same
 
-      // Add fields
-      final ColumnDefinitions vars = stmt.getVariables();
-      for (int i = 1; i < vars.size(); i++) {
-        boundStmt.setString(i, values.get(vars.getName(i)).toString());
-      }
+      final SimpleStatement statement = insert.builder()
+          .setConsistencyLevel(writeConsistencyLevel)
+          .addPositionalValues(namedValues.values())
+          .addPositionalValue(key)
+          .setTracing(executionTracing)
+          .build();
 
-      session.execute(boundStmt);
-
+      session.execute(statement);
       return Status.OK;
-    } catch (final Exception e) {
-      LOG.error(MessageFormatter.format("Error inserting key: {}", key).getMessage(), e);
+
+    } catch (final Exception error) {
+      LOG.error(MessageFormatter.format("Error inserting key: {}", key).getMessage(), error);
     }
 
     return Status.ERROR;
@@ -267,60 +273,52 @@ public class CassandraCQLClientExt extends DB {
    * @return Zero on success, a non-zero error code on error
    */
   @Override
-  public Status read(final String table, final String key, final Set<String> fields,
-                     final Map<String, ByteIterator> result) {
+  public Status read(
+      final String table,
+      final String key,
+      final Set<String> fields,
+      final Map<String, ByteIterator> result) {
+
     try {
-      PreparedStatement stmt = (fields == null) ? READ_ALL_STMT.get() : READ_STMTS.get(fields);
 
-      // Prepare statement on demand
-      if (stmt == null) {
-        final Select.Builder selectBuilder;
+      Select select = (fields == null) ? READ_ALL_STATEMENT.get() : READ_STATEMENTS.get(fields);
 
-        if (fields == null) {
-          selectBuilder = QueryBuilder.select().all();
-        } else {
-          selectBuilder = QueryBuilder.select();
-          for (final String col : fields) {
-            ((Select.Selection) selectBuilder).column(col);
-          }
-        }
+      if (select == null) {
 
-        stmt = session.prepare(selectBuilder.from(table)
-            .where(QueryBuilder.eq(YCSB_KEY, QueryBuilder.bindMarker()))
-            .limit(1));
-        stmt.setConsistencyLevel(readConsistencyLevel);
-        if (trace) {
-          stmt.enableTracing();
-        }
-
-        final PreparedStatement prevStmt = (fields == null) ?
-            READ_ALL_STMT.getAndSet(stmt) :
-            READ_STMTS.putIfAbsent(new HashSet(fields), stmt);
-        if (prevStmt != null) {
-          stmt = prevStmt;
-        }
+        select = fields == null
+            ? READ_ALL_STATEMENT.updateAndGet(prior -> prior == null
+                ? selectFrom(table).all().limit(1)
+                : prior)
+            : READ_STATEMENTS.compute(new HashSet<>(fields), (name, prior) -> prior == null
+                ? selectFrom(table)
+                    .columns(fields)
+                    .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
+                : prior);
       }
 
-      LOG.debug(stmt.getQueryString());
-      LOG.debug("key = {}", key);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("statement: {}, key: {}, fields: {}", select.asCql(), key, fields);
+      }
 
-      final ResultSet rs = session.execute(stmt.bind(key));
+      final SimpleStatement statement = select.builder()
+          .setConsistencyLevel(readConsistencyLevel)
+          .setTracing(executionTracing)
+          .addPositionalValue(key)
+          .build();
 
-      if (rs.isExhausted()) {
+      final ResultSet resultSet = session.execute(statement);
+      final Row row = resultSet.one();
+
+      if (row == null) {
         return Status.NOT_FOUND;
       }
 
-      // Should be only 1 row
-      final Row row = rs.one();
-      final ColumnDefinitions cd = row.getColumnDefinitions();
+      final ColumnDefinitions columnDefinitions = row.getColumnDefinitions();
 
-      for (final ColumnDefinitions.Definition def : cd) {
-        final ByteBuffer val = row.getBytesUnsafe(def.getName());
-        if (val != null) {
-          result.put(def.getName(), new ByteArrayByteIterator(val.array()));
-        } else {
-          result.put(def.getName(), null);
-        }
+      for (final ColumnDefinition definition : columnDefinitions) {
+        final ByteBuffer value = row.getBytesUnsafe(definition.getName());
+        final String name = definition.getName().toString();
+        result.put(name, value == null ? null : new ByteArrayByteIterator(value.array()));
       }
 
       return Status.OK;
@@ -333,87 +331,72 @@ public class CassandraCQLClientExt extends DB {
   }
 
   /**
-   * Perform a range scan for a set of records in the database. Each field/value pair from the result will be
-   * stored in
-   * a HashMap. Cassandra CQL uses "token" method for range scan which doesn't always yield intuitive results.
+   * Perform a range scan for a set of records in the database.
+   * <p>
+   * Each field/value pair from the result will be stored in a HashMap. Cassandra CQL uses "token" method for range
+   * scan which doesn't always yield intuitive results.
    *
    * @param table       The name of the table
-   * @param startkey    The record key of the first record to read.
-   * @param recordcount The number of records to read
+   * @param startKey    The record key of the first record to read.
+   * @param recordCount The number of records to read
    * @param fields      The list of fields to read, or null for all of them
    * @param result      A Vector of HashMaps, where each HashMap is a set field/value pairs for one record
    *
    * @return Zero on success, a non-zero error code on error
    */
   @Override
-  public Status scan(final String table, final String startkey, final int recordcount,
-                     final Set<String> fields, final Vector<HashMap<String, ByteIterator>> result) {
+  public Status scan(
+      final String table,
+      final String startKey,
+      final int recordCount,
+      final Set<String> fields,
+      final Vector<HashMap<String, ByteIterator>> result) {
 
     try {
-      PreparedStatement stmt = (fields == null) ? SCAN_ALL_STMT.get() : SCAN_STMTS.get(fields);
 
-      // Prepare statement on demand
-      if (stmt == null) {
-        final Select.Builder selectBuilder;
+      Select select = (fields == null) ? SCAN_ALL_STATEMENT.get() : SCAN_STATEMENTS.get(fields);
 
-        if (fields == null) {
-          selectBuilder = QueryBuilder.select().all();
-        } else {
-          selectBuilder = QueryBuilder.select();
-          for (final String col : fields) {
-            ((Select.Selection) selectBuilder).column(col);
-          }
-        }
+      if (select == null) {
 
-        final Select selectStmt = selectBuilder.from(table);
+        // The statement builder in driver-3 (?) is not setup for tokens
+        // TODO (DANOBLE) Here's the query fragment we expect: "where token(YCSB_KEY) >= token(<bind-marker>) limit
+        //  <bind-marker>". If we don't get that from select::asCql, then code it manually
 
-        // The statement builder is not setup right for tokens.
-        // So, we need to build it manually.
-        final String initialStmt = selectStmt.toString();
-        final StringBuilder scanStmt = new StringBuilder();
-        scanStmt.append(initialStmt, 0, initialStmt.length() - 1);
-        scanStmt.append(" WHERE ");
-        scanStmt.append(QueryBuilder.token(YCSB_KEY));
-        scanStmt.append(" >= ");
-        scanStmt.append("token(");
-        scanStmt.append(QueryBuilder.bindMarker());
-        scanStmt.append(")");
-        scanStmt.append(" LIMIT ");
-        scanStmt.append(QueryBuilder.bindMarker());
-
-        stmt = session.prepare(scanStmt.toString());
-        stmt.setConsistencyLevel(readConsistencyLevel);
-        if (trace) {
-          stmt.enableTracing();
-        }
-
-        final PreparedStatement prevStmt = (fields == null) ?
-            SCAN_ALL_STMT.getAndSet(stmt) :
-            SCAN_STMTS.putIfAbsent(new HashSet(fields), stmt);
-        if (prevStmt != null) {
-          stmt = prevStmt;
-        }
+        select = (fields == null
+            ? SCAN_ALL_STATEMENT.updateAndGet(prior -> prior == null
+                ? selectFrom(table).all()
+                : prior)
+            : SCAN_STATEMENTS.compute(new HashSet<>(fields), (name, prior) -> prior == null
+                ? selectFrom(table).columns(fields)
+                : prior))
+            .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
+            .limit(bindMarker());
       }
 
-      LOG.debug(stmt.getQueryString());
-      LOG.debug("startKey = {}, recordcount = {}", startkey, recordcount);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("statement: {}, startKey: {}, recordCount: {}, fields: {}",
+            select.asCql(),
+            startKey,
+            recordCount,
+            fields);
+      }
 
-      final ResultSet rs = session.execute(stmt.bind(startkey, Integer.valueOf(recordcount)));
+      final SimpleStatement statement = select.builder()
+          .addPositionalValues(startKey, recordCount)
+          .setConsistencyLevel(readConsistencyLevel)
+          .setTracing(executionTracing)
+          .build();
 
-      HashMap<String, ByteIterator> tuple;
-      while (!rs.isExhausted()) {
-        final Row row = rs.one();
-        tuple = new HashMap<String, ByteIterator>();
+      final ResultSet resultSet = session.execute(statement);
 
-        final ColumnDefinitions cd = row.getColumnDefinitions();
+      for (final Row row : resultSet) {
 
-        for (final ColumnDefinitions.Definition def : cd) {
-          final ByteBuffer val = row.getBytesUnsafe(def.getName());
-          if (val != null) {
-            tuple.put(def.getName(), new ByteArrayByteIterator(val.array()));
-          } else {
-            tuple.put(def.getName(), null);
-          }
+        final HashMap<String, ByteIterator> tuple = new HashMap<>(row.size());
+
+        for (final ColumnDefinition columnDefinition : row.getColumnDefinitions()) {
+          final String name = columnDefinition.getName().toString();
+          final ByteBuffer value = row.getBytesUnsafe(name);
+          tuple.put(name, value == null ? null : new ByteArrayByteIterator(value.array()));
         }
 
         result.add(tuple);
@@ -421,9 +404,8 @@ public class CassandraCQLClientExt extends DB {
 
       return Status.OK;
 
-    } catch (final Exception e) {
-      LOG.error(
-          MessageFormatter.format("Error scanning with startkey: {}", startkey).getMessage(), e);
+    } catch (final Exception error) {
+      LOG.error("Failed scanning with startKey '{}' due to: ", startKey, error);
       return Status.ERROR;
     }
 
@@ -435,62 +417,47 @@ public class CassandraCQLClientExt extends DB {
    *
    * @param table  The name of the table
    * @param key    The record key of the record to write.
-   * @param values A HashMap of field/value pairs to update in the record
+   * @param namedValues A HashMap of field/value pairs to update in the record
    *
    * @return Zero on success, a non-zero error code on error
    */
   @Override
-  public Status update(final String table, final String key, final Map<String, ByteIterator> values) {
+  public Status update(final String table, final String key, final Map<String, ByteIterator> namedValues) {
 
     try {
-      final Set<String> fields = values.keySet();
-      PreparedStatement stmt = UPDATE_STMTS.get(fields);
 
-      // Prepare statement on demand
-      if (stmt == null) {
-        final Update updateStmt = QueryBuilder.update(table);
+      final Set<String> names = namedValues.keySet();
+      Update update = UPDATE_STATEMENTS.get(names);
 
-        // Add fields
-        for (final String field : fields) {
-          updateStmt.with(QueryBuilder.set(field, QueryBuilder.bindMarker()));
-        }
+      if (update == null) {
 
-        // Add key
-        updateStmt.where(QueryBuilder.eq(YCSB_KEY, QueryBuilder.bindMarker()));
+        update = QueryBuilder.update(table)
+            .set(names.stream().map(name -> Assignment.setColumn(name, bindMarker())).toArray(Assignment[]::new))
+            .whereColumn(YCSB_KEY).isEqualTo(bindMarker());
 
-        stmt = session.prepare(updateStmt);
-        stmt.setConsistencyLevel(writeConsistencyLevel);
-        if (trace) {
-          stmt.enableTracing();
-        }
+        final Update priorUpdate = UPDATE_STATEMENTS.putIfAbsent(new HashSet<String>(names), update);
 
-        final PreparedStatement prevStmt = UPDATE_STMTS.putIfAbsent(new HashSet(fields), stmt);
-        if (prevStmt != null) {
-          stmt = prevStmt;
+        if (priorUpdate != null) {
+          update = priorUpdate;
         }
       }
 
       if (LOG.isDebugEnabled()) {
-        LOG.debug(stmt.getQueryString());
-        LOG.debug("key = {}", key);
-        for (final Map.Entry<String, ByteIterator> entry : values.entrySet()) {
-          LOG.debug("{} = {}", entry.getKey(), entry.getValue());
-        }
+        LOG.debug("statement: {}, key: {}, values: {}", update.asCql(), key, namedValues);
       }
 
-      // Add fields
-      final ColumnDefinitions vars = stmt.getVariables();
-      final BoundStatement boundStmt = stmt.bind();
-      for (int i = 0; i < vars.size() - 1; i++) {
-        boundStmt.setString(i, values.get(vars.getName(i)).toString());
-      }
+      // TODO (DANOBLE) verify that the order of names and values are the same
 
-      // Add key
-      boundStmt.setString(vars.size() - 1, key);
+      final SimpleStatement statement = update.builder()
+          .setConsistencyLevel(writeConsistencyLevel)
+          .addPositionalValues(namedValues.values())
+          .addPositionalValue(key)
+          .setTracing(executionTracing)
+          .build();
 
-      session.execute(boundStmt);
-
+      session.execute(statement);
       return Status.OK;
+
     } catch (final Exception e) {
       LOG.error(MessageFormatter.format("Error updating key: {}", key).getMessage(), e);
     }
