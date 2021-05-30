@@ -440,22 +440,20 @@ public class CassandraCQLClientExtTest {
               .withConfigLoader(configLoader)
               .build();
 
-          // TODO (DANOBLE) eliminate the need for this workaround
-          //  It happens that after dropping a keyspace, the Cosmos Cassandra API allows us to set the session keyspace
-          //  even though the keyspace no longer exists. More than that this statement will do nothing because--from a
-          //  Cosmos Cassandra API perspective, the keyspace still exists.
+          // TODO (DANOBLE) Get to the bottom of this issue: The Cosmos Cassandra API does not fully recognize when
+          //  a keyspace is dropped.
           //  Evidence:
-          //  - The session can be configured with the non-existent keyspace.
-          //        datastax-java-driver.basic.session-keyspace = <non-existent-keyspace-name>
-          //    Expected: Setting session-keyspace to a non-existent keyspace name causes CqlSessionBuilder::build to
+          //  - A session can be configured with a keyspace name after the keyspace with that name has been dropped.
+          //        datastax-java-driver.basic.session-keyspace = <dropped-keyspace-name>
+          //    Expected: Setting session-keyspace to the name of a dropped keyspace causes CqlSessionBuilder::build to
           //    throw an InvalidKeyspaceException.
           //  - This command does not create a keyspace:
-          //        CREATE KEYSPACE IF NOT EXISTS <non-existent-keyspace-name>
-          //    Expected: A keyspace with the non-existent keyspace name is created.
+          //        CREATE KEYSPACE IF NOT EXISTS <dropped-keyspace-name>
+          //    Expected: A keyspace with the dropped keyspace name is created.
           //  Workaround:
           //  - Try to create the keyspace:
           //        CREATE KEYSPACE <non-existent-keyspace-name>
-          //  - When the command fails catch and ignore the AlreadyExistsException thrown by CqlSession::execute.
+          //  - If the command fails, catch and ignore the AlreadyExistsException thrown by CqlSession::execute.
 
           final SimpleStatement createKeyspace = SchemaBuilder.createKeyspace(keyspaceName)
               .withSimpleStrategy(4)
