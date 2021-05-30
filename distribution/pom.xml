@@ -76,6 +76,11 @@ LICENSE file.
     </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
+      <artifactId>cosmos-cassandra-driver-4-binding</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>site.ycsb</groupId>
       <artifactId>couchbase-binding</artifactId>
       <version>${project.version}</version>
     </dependency>

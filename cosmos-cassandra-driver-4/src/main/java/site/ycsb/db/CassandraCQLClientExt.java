@@ -15,18 +15,16 @@ import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.ColumnDefinition;
 import com.datastax.oss.driver.api.core.cql.ColumnDefinitions;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
-import com.datastax.oss.driver.api.querybuilder.delete.Delete;
 import com.datastax.oss.driver.api.querybuilder.insert.Insert;
 import com.datastax.oss.driver.api.querybuilder.relation.Relation;
-import com.datastax.oss.driver.api.querybuilder.select.Select;
 import com.datastax.oss.driver.api.querybuilder.update.Assignment;
-import com.datastax.oss.driver.api.querybuilder.update.Update;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
@@ -77,21 +75,23 @@ public class CassandraCQLClientExt extends DB {
   public static final String YCSB_KEY = "y_id";
 
   static final Logger LOG = LoggerFactory.getLogger(CassandraCQLClientExt.class);
-  private static final AtomicReference<Delete> DELETE_STATEMENT = new AtomicReference<>();
+
 
   /**
    * Count the number of times initialized to teardown on the last {@link #cleanup()}.
    */
+
+  private static final AtomicReference<PreparedStatement> DELETE_STATEMENT = new AtomicReference<>();
   private static final AtomicInteger INIT_COUNT = new AtomicInteger();
-  private static final ConcurrentMap<Set<String>, Insert> INSERT_STATEMENTS = new ConcurrentHashMap<>();
-  private static final AtomicReference<Select> READ_ALL_STATEMENT = new AtomicReference<>();
-  private static final ConcurrentMap<Set<String>, Select> READ_STATEMENTS = new ConcurrentHashMap<>();
-  private static final AtomicReference<Select> SCAN_ALL_STATEMENT = new AtomicReference<>();
-  private static final ConcurrentMap<Set<String>, Select> SCAN_STATEMENTS = new ConcurrentHashMap<>();
-  private static final ConcurrentMap<Set<String>, Update> UPDATE_STATEMENTS = new ConcurrentHashMap<>();
+  private static final ConcurrentMap<Set<String>, PreparedStatement> INSERT_STATEMENTS = new ConcurrentHashMap<>();
+  private static final AtomicReference<PreparedStatement> READ_ALL_STATEMENT = new AtomicReference<>();
+  private static final ConcurrentMap<Set<String>, PreparedStatement> READ_STATEMENTS = new ConcurrentHashMap<>();
+  private static final AtomicReference<PreparedStatement> SCAN_ALL_STATEMENT = new AtomicReference<>();
+  private static final ConcurrentMap<Set<String>, PreparedStatement> SCAN_STATEMENTS = new ConcurrentHashMap<>();
+  private static final ConcurrentMap<Set<String>, PreparedStatement> UPDATE_STATEMENTS = new ConcurrentHashMap<>();
 
   private static ConsistencyLevel readConsistencyLevel = ConsistencyLevel.QUORUM;
-  private static boolean executionTracing = false;
+  private static boolean tracing = false;
   private static CqlSession session = null;
   private static ConsistencyLevel writeConsistencyLevel = ConsistencyLevel.QUORUM;
 
@@ -133,19 +133,15 @@ public class CassandraCQLClientExt extends DB {
 
     try {
 
-      final Delete delete = DELETE_STATEMENT.updateAndGet(prior -> prior == null
-          ? QueryBuilder.deleteFrom(table).whereColumn(YCSB_KEY).isEqualTo(bindMarker())
+      final PreparedStatement delete = DELETE_STATEMENT.updateAndGet(prior -> prior == null
+          ? session.prepare(QueryBuilder.deleteFrom(table).whereColumn(YCSB_KEY).isEqualTo(bindMarker()).build()
+              .setConsistencyLevel(writeConsistencyLevel)
+              .setTracing(tracing))
           : prior);
 
-      LOG.debug("statement: {}}, key: {}", delete, key);
+      LOG.debug("statement: {}}, key: {}", delete.getQuery(), key);
+      session.execute(delete.bind(key));
 
-      final SimpleStatement statement = delete.builder()
-          .setConsistencyLevel(writeConsistencyLevel)
-          .setTracing(executionTracing)
-          .addPositionalValue(key)
-          .build();
-
-      session.execute(statement);
       return Status.OK;
 
     } catch (final Exception error) {
@@ -178,7 +174,7 @@ public class CassandraCQLClientExt extends DB {
             APPLICATION_CONFIGURATION_FILE_PROPERTY,
             APPLICATION_CONFIGURATION_FILE_DEFAULT));
 
-        executionTracing = Boolean.getBoolean(this.getProperties().getProperty(
+        tracing = Boolean.getBoolean(this.getProperties().getProperty(
             EXECUTION_TRACING_PROPERTY,
             EXECUTION_TRACING_DEFAULT));
 
@@ -224,35 +220,24 @@ public class CassandraCQLClientExt extends DB {
     try {
 
       final Set<String> fields = namedValues.keySet();
-      Insert insert = INSERT_STATEMENTS.get(fields);
 
-      if (insert == null) {
-
-        insert = QueryBuilder.insertInto(table)
-            .value(YCSB_KEY, bindMarker())
-            .values(fields.stream().collect(Collectors.toMap(Function.identity(), name -> bindMarker())));
-
-        final Insert prior = INSERT_STATEMENTS.putIfAbsent(new HashSet<>(fields), insert);
-
-        if (prior != null) {
-          insert = prior;
-        }
-      }
+      final PreparedStatement statement = INSERT_STATEMENTS.compute(fields, (ignored, prior) -> {
+          if (prior != null) {
+            return prior;
+          }
+          final Insert insert = QueryBuilder.insertInto(table)
+              .value(YCSB_KEY, bindMarker(YCSB_KEY))
+              .values(fields.stream().collect(Collectors.toMap(Function.identity(), name -> bindMarker())));
+          return session.prepare(insert.build().setConsistencyLevel(writeConsistencyLevel).setTracing(tracing));
+        });
 
       if (LOG.isDebugEnabled()) {
-        LOG.debug("statement: {}, key: {}, values: {}", insert.asCql(), key, namedValues);
+        LOG.debug("statement: {}, key: {}, values: {}", statement.getQuery(), key, namedValues);
       }
 
-      // TODO (DANOBLE) verify that the order of names and values are the same
+      // TODO (DANOBLE) verify that the order of namedValues::keySet and namedValues::values are the same
 
-      final SimpleStatement statement = insert.builder()
-          .setConsistencyLevel(writeConsistencyLevel)
-          .addPositionalValues(namedValues.values())
-          .addPositionalValue(key)
-          .setTracing(executionTracing)
-          .build();
-
-      session.execute(statement);
+      session.execute(statement.boundStatementBuilder(namedValues.values()).setString(YCSB_KEY, key).build());
       return Status.OK;
 
     } catch (final Exception error) {
@@ -281,32 +266,33 @@ public class CassandraCQLClientExt extends DB {
 
     try {
 
-      Select select = (fields == null) ? READ_ALL_STATEMENT.get() : READ_STATEMENTS.get(fields);
-
-      if (select == null) {
-
-        select = fields == null
-            ? READ_ALL_STATEMENT.updateAndGet(prior -> prior == null
-                ? selectFrom(table).all().limit(1)
-                : prior)
-            : READ_STATEMENTS.compute(new HashSet<>(fields), (name, prior) -> prior == null
-                ? selectFrom(table)
-                    .columns(fields)
-                    .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
-                : prior);
-      }
+      final PreparedStatement statement = fields == null
+          ? READ_ALL_STATEMENT.updateAndGet(prior -> {
+              if (prior != null) {
+                return prior;
+              }
+              final SimpleStatement select = selectFrom(table).all()
+                  .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
+                  .limit(1)
+                  .build();
+              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+            })
+          : READ_STATEMENTS.compute(new HashSet<>(fields), (names, prior) -> {
+              if (prior != null) {
+                return prior;
+              }
+              final SimpleStatement select = selectFrom(table).columns(names)
+                  .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
+                  .limit(1)
+                  .build();
+              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+            });
 
       if (LOG.isDebugEnabled()) {
-        LOG.debug("statement: {}, key: {}, fields: {}", select.asCql(), key, fields);
+        LOG.debug("statement: {}, key: {}, fields: {}", statement.getQuery(), key, fields);
       }
 
-      final SimpleStatement statement = select.builder()
-          .setConsistencyLevel(readConsistencyLevel)
-          .setTracing(executionTracing)
-          .addPositionalValue(key)
-          .build();
-
-      final ResultSet resultSet = session.execute(statement);
+      final ResultSet resultSet = session.execute(statement.bind(key));
       final Row row = resultSet.one();
 
       if (row == null) {
@@ -354,40 +340,41 @@ public class CassandraCQLClientExt extends DB {
 
     try {
 
-      Select select = (fields == null) ? SCAN_ALL_STATEMENT.get() : SCAN_STATEMENTS.get(fields);
+      // TODO (DANOBLE) The statement builder in driver-3 (?) is not set up for tokens. Here's the query fragment we
+      //  expect: "where token(YCSB_KEY) >= token(<bind-marker>) limit <bind-marker>". If we don't get that from
+      //  select::asCql, then code it manually
 
-      if (select == null) {
-
-        // The statement builder in driver-3 (?) is not setup for tokens
-        // TODO (DANOBLE) Here's the query fragment we expect: "where token(YCSB_KEY) >= token(<bind-marker>) limit
-        //  <bind-marker>". If we don't get that from select::asCql, then code it manually
-
-        select = (fields == null
-            ? SCAN_ALL_STATEMENT.updateAndGet(prior -> prior == null
-                ? selectFrom(table).all()
-                : prior)
-            : SCAN_STATEMENTS.compute(new HashSet<>(fields), (name, prior) -> prior == null
-                ? selectFrom(table).columns(fields)
-                : prior))
-            .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
-            .limit(bindMarker());
-      }
+      final PreparedStatement statement = fields == null
+          ? SCAN_ALL_STATEMENT.updateAndGet(prior -> {
+              if (prior != null) {
+                return prior;
+              }
+              final SimpleStatement select = selectFrom(table).all()
+                  .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
+                  .limit(bindMarker())
+                  .build();
+              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+            })
+          : SCAN_STATEMENTS.compute(new HashSet<>(fields), (names, prior) -> {
+              if (prior != null) {
+                return prior;
+              }
+              final SimpleStatement select = selectFrom(table).columns(names)
+                  .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
+                  .limit(bindMarker())
+                  .build();
+              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+            });
 
       if (LOG.isDebugEnabled()) {
         LOG.debug("statement: {}, startKey: {}, recordCount: {}, fields: {}",
-            select.asCql(),
+            statement.getQuery(),
             startKey,
             recordCount,
             fields);
       }
 
-      final SimpleStatement statement = select.builder()
-          .addPositionalValues(startKey, recordCount)
-          .setConsistencyLevel(readConsistencyLevel)
-          .setTracing(executionTracing)
-          .build();
-
-      final ResultSet resultSet = session.execute(statement);
+      final ResultSet resultSet = session.execute(statement.bind(startKey, recordCount));
 
       for (final Row row : resultSet) {
 
@@ -425,37 +412,28 @@ public class CassandraCQLClientExt extends DB {
   public Status update(final String table, final String key, final Map<String, ByteIterator> namedValues) {
 
     try {
+      final Set<String> fields = new HashSet<>(namedValues.keySet());
 
-      final Set<String> names = namedValues.keySet();
-      Update update = UPDATE_STATEMENTS.get(names);
-
-      if (update == null) {
-
-        update = QueryBuilder.update(table)
-            .set(names.stream().map(name -> Assignment.setColumn(name, bindMarker())).toArray(Assignment[]::new))
-            .whereColumn(YCSB_KEY).isEqualTo(bindMarker());
-
-        final Update priorUpdate = UPDATE_STATEMENTS.putIfAbsent(new HashSet<String>(names), update);
-
-        if (priorUpdate != null) {
-          update = priorUpdate;
-        }
-      }
+      final PreparedStatement statement = UPDATE_STATEMENTS.compute(fields, (names, prior) -> {
+          if (prior != null) {
+            return prior;
+          }
+          final SimpleStatement update = QueryBuilder.update(table)
+              .set(names.stream()
+                  .map(name -> Assignment.setColumn(name, bindMarker()))
+                  .toArray(Assignment[]::new))
+              .whereColumn(YCSB_KEY).isEqualTo(bindMarker(YCSB_KEY))
+              .build();
+          return session.prepare(update.setConsistencyLevel(writeConsistencyLevel).setTracing(tracing));
+        });
 
       if (LOG.isDebugEnabled()) {
-        LOG.debug("statement: {}, key: {}, values: {}", update.asCql(), key, namedValues);
+        LOG.debug("statement: {}, key: {}, values: {}", statement.getQuery(), key, namedValues);
       }
 
-      // TODO (DANOBLE) verify that the order of names and values are the same
+      // TODO (DANOBLE) verify that the order of namedValues::keySet and namedValues::values are the same
 
-      final SimpleStatement statement = update.builder()
-          .setConsistencyLevel(writeConsistencyLevel)
-          .addPositionalValues(namedValues.values())
-          .addPositionalValue(key)
-          .setTracing(executionTracing)
-          .build();
-
-      session.execute(statement);
+      session.execute(statement.boundStatementBuilder(namedValues.values()).setString(YCSB_KEY, key).build());
       return Status.OK;
 
     } catch (final Exception e) {
