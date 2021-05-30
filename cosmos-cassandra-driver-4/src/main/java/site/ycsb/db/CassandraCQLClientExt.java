@@ -9,9 +9,7 @@
 
 package site.ycsb.db;
 
-import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.ColumnDefinition;
 import com.datastax.oss.driver.api.core.cql.ColumnDefinitions;
@@ -22,7 +20,6 @@ import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
-import com.datastax.oss.driver.api.querybuilder.insert.Insert;
 import com.datastax.oss.driver.api.querybuilder.relation.Relation;
 import com.datastax.oss.driver.api.querybuilder.update.Assignment;
 import org.slf4j.Logger;
@@ -58,31 +55,27 @@ import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.selectFrom;
  *
  * @author David-Noble-at-work
  */
+// TODO (DANOBLE) Add startup and shutdown script support.
 public class CassandraCQLClientExt extends DB {
 
-  public static final String APPLICATION_CONFIGURATION_FILE_DEFAULT = "application.conf";
-  public static final String APPLICATION_CONFIGURATION_FILE_PROPERTY = "config-file";
+  public static final String CONFIG_FILE_DEFAULT = "application.conf";
+  public static final String CONFIG_FILE_PROPERTY = "cassandra.datastax-java-driver.config-file";
 
-  public static final String EXECUTION_TRACING_DEFAULT = "false";
-  public static final String EXECUTION_TRACING_PROPERTY = "execution-tracing";
-
-  public static final String READ_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
-  public static final String READ_CONSISTENCY_LEVEL_PROPERTY = "read-consistency-level";
-
-  public static final String WRITE_CONSISTENCY_LEVEL_DEFAULT = ConsistencyLevel.QUORUM.name();
-  public static final String WRITE_CONSISTENCY_LEVEL_PROPERTY = "write-consistency-level";
+  public static final String REQUEST_TRACING_DEFAULT = "false";
+  public static final String REQUEST_TRACING_PROPERTY = "cassandra.datastax-java-driver.request-tracing";
 
   public static final String YCSB_KEY = "y_id";
 
   static final Logger LOG = LoggerFactory.getLogger(CassandraCQLClientExt.class);
 
-
   /**
    * Count the number of times initialized to teardown on the last {@link #cleanup()}.
    */
+  static final AtomicInteger INIT_COUNT = new AtomicInteger();
+  static final String READ_PROFILE_NAME = "read";
+  static final String WRITE_PROFILE_NAME = "write";
 
   private static final AtomicReference<PreparedStatement> DELETE_STATEMENT = new AtomicReference<>();
-  private static final AtomicInteger INIT_COUNT = new AtomicInteger();
   private static final ConcurrentMap<Set<String>, PreparedStatement> INSERT_STATEMENTS = new ConcurrentHashMap<>();
   private static final AtomicReference<PreparedStatement> READ_ALL_STATEMENT = new AtomicReference<>();
   private static final ConcurrentMap<Set<String>, PreparedStatement> READ_STATEMENTS = new ConcurrentHashMap<>();
@@ -90,10 +83,8 @@ public class CassandraCQLClientExt extends DB {
   private static final ConcurrentMap<Set<String>, PreparedStatement> SCAN_STATEMENTS = new ConcurrentHashMap<>();
   private static final ConcurrentMap<Set<String>, PreparedStatement> UPDATE_STATEMENTS = new ConcurrentHashMap<>();
 
-  private static ConsistencyLevel readConsistencyLevel = ConsistencyLevel.QUORUM;
-  private static boolean tracing = false;
   private static CqlSession session = null;
-  private static ConsistencyLevel writeConsistencyLevel = ConsistencyLevel.QUORUM;
+  private static boolean tracing = false;
 
   /**
    * Cleanup any state for this DB. Called once per DB instance; there is one DB instance per client thread.
@@ -135,7 +126,7 @@ public class CassandraCQLClientExt extends DB {
 
       final PreparedStatement delete = DELETE_STATEMENT.updateAndGet(prior -> prior == null
           ? session.prepare(QueryBuilder.deleteFrom(table).whereColumn(YCSB_KEY).isEqualTo(bindMarker()).build()
-              .setConsistencyLevel(writeConsistencyLevel)
+              .setExecutionProfileName(WRITE_PROFILE_NAME)
               .setTracing(tracing))
           : prior);
 
@@ -171,20 +162,12 @@ public class CassandraCQLClientExt extends DB {
       try {
 
         final File applicationConfigurationFile = new File(this.getProperties().getProperty(
-            APPLICATION_CONFIGURATION_FILE_PROPERTY,
-            APPLICATION_CONFIGURATION_FILE_DEFAULT));
+            CONFIG_FILE_PROPERTY,
+            CONFIG_FILE_DEFAULT));
 
         tracing = Boolean.getBoolean(this.getProperties().getProperty(
-            EXECUTION_TRACING_PROPERTY,
-            EXECUTION_TRACING_DEFAULT));
-
-        readConsistencyLevel = DefaultConsistencyLevel.valueOf(this.getProperties().getProperty(
-            READ_CONSISTENCY_LEVEL_PROPERTY,
-            READ_CONSISTENCY_LEVEL_DEFAULT));
-
-        writeConsistencyLevel = DefaultConsistencyLevel.valueOf(this.getProperties().getProperty(
-            WRITE_CONSISTENCY_LEVEL_PROPERTY,
-            WRITE_CONSISTENCY_LEVEL_DEFAULT));
+            REQUEST_TRACING_PROPERTY,
+            REQUEST_TRACING_DEFAULT));
 
         session = CqlSession.builder()
             .withClassLoader(ClassLoader.getSystemClassLoader())
@@ -225,10 +208,11 @@ public class CassandraCQLClientExt extends DB {
           if (prior != null) {
             return prior;
           }
-          final Insert insert = QueryBuilder.insertInto(table)
+          final SimpleStatement insert = QueryBuilder.insertInto(table)
+              .values(fields.stream().collect(Collectors.toMap(Function.identity(), name -> bindMarker())))
               .value(YCSB_KEY, bindMarker(YCSB_KEY))
-              .values(fields.stream().collect(Collectors.toMap(Function.identity(), name -> bindMarker())));
-          return session.prepare(insert.build().setConsistencyLevel(writeConsistencyLevel).setTracing(tracing));
+              .build();
+          return session.prepare(insert.setExecutionProfileName(WRITE_PROFILE_NAME).setTracing(tracing));
         });
 
       if (LOG.isDebugEnabled()) {
@@ -275,7 +259,7 @@ public class CassandraCQLClientExt extends DB {
                   .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
                   .limit(1)
                   .build();
-              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+              return session.prepare(select.setExecutionProfileName(READ_PROFILE_NAME).setTracing(tracing));
             })
           : READ_STATEMENTS.compute(new HashSet<>(fields), (names, prior) -> {
               if (prior != null) {
@@ -285,7 +269,7 @@ public class CassandraCQLClientExt extends DB {
                   .where(Relation.column(YCSB_KEY).isEqualTo(bindMarker()))
                   .limit(1)
                   .build();
-              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+              return session.prepare(select.setExecutionProfileName(READ_PROFILE_NAME).setTracing(tracing));
             });
 
       if (LOG.isDebugEnabled()) {
@@ -353,7 +337,7 @@ public class CassandraCQLClientExt extends DB {
                   .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
                   .limit(bindMarker())
                   .build();
-              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+              return session.prepare(select.setExecutionProfileName(READ_PROFILE_NAME).setTracing(tracing));
             })
           : SCAN_STATEMENTS.compute(new HashSet<>(fields), (names, prior) -> {
               if (prior != null) {
@@ -363,7 +347,7 @@ public class CassandraCQLClientExt extends DB {
                   .whereToken(YCSB_KEY).isGreaterThanOrEqualTo(bindMarker())
                   .limit(bindMarker())
                   .build();
-              return session.prepare(select.setConsistencyLevel(readConsistencyLevel).setTracing(tracing));
+              return session.prepare(select.setExecutionProfileName(READ_PROFILE_NAME).setTracing(tracing));
             });
 
       if (LOG.isDebugEnabled()) {
@@ -424,7 +408,7 @@ public class CassandraCQLClientExt extends DB {
                   .toArray(Assignment[]::new))
               .whereColumn(YCSB_KEY).isEqualTo(bindMarker(YCSB_KEY))
               .build();
-          return session.prepare(update.setConsistencyLevel(writeConsistencyLevel).setTracing(tracing));
+          return session.prepare(update.setExecutionProfileName(WRITE_PROFILE_NAME).setTracing(tracing));
         });
 
       if (LOG.isDebugEnabled()) {

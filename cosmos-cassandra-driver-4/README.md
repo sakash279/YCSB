@@ -21,43 +21,18 @@ Binding for [Apache Cassandra](http://cassandra.apache.org), using the CQL API v
 [DataStax Java Driver 4](https://docs.datastax.com/en/developer/java-driver/4.11/) with 
 [Cosmos DB awareness features](https://github.com/Azure/azure-cosmos-cassandra-extensions/tree/develop/java-driver-4).
 
-**Note that `replication_factor` and consistency levels (below) will affect performance.**
-
 ## Cassandra Configuration Parameters
 
-- `hosts` (**required**)
-  - Cassandra nodes to connect to.
-  - No default.
+- `cassandra.datastax-java-driver.config-file` (**required**)
+  - Location of the application configuration file. See [DataStax Java Driver 4 Configuration][1] and `application.conf`
+    in the `cosmos-cassandra-driver-4-binding` sources for the settings that you must provide.
+  - Default: `application.conf`.
+  
+- `cassandra.datastax-java-driver.request-tracing` (**&optional**)
+  - Tracing is supposed to be run on a small percentage of requests only. This setting will enable or disable tracing
+    on every query. We make it available here for debugging and troubleshooting. As a rule do not enable it on YCSB 
+    runs as it will risk overwhelming your Cosmos Cassandra API instance. See [DataStax Java Driver 4 Configuration][2].
+  - Default: `false`.
 
-* `port`
-  * CQL port for communicating with Cassandra cluster.
-  * Default is `9042`.
-
-- `cassandra.keyspace`
-  Keyspace name - must match the keyspace for the table created (see above).
-  See http://docs.datastax.com/en/cql/3.1/cql/cql_reference/create_keyspace_r.html for details.
-
-  - Default value is `ycsb`
-
-- `cassandra.username`
-- `cassandra.password`
-  - Optional user name and password for authentication. See http://docs.datastax.com/en/cassandra/2.0/cassandra/security/security_config_native_authenticate_t.html for details.
-
-* `cassandra.readconsistencylevel`
-* `cassandra.writeconsistencylevel`
-
-  * Default value is `QUORUM`
-  - Consistency level for reads and writes, respectively. See the [DataStax documentation](http://docs.datastax.com/en/cassandra/2.0/cassandra/dml/dml_config_consistency_c.html) for details.
-
-* `cassandra.maxconnections`
-* `cassandra.coreconnections`
-  * Defaults for max and core connections can be found here: https://datastax.github.io/java-driver/2.1.8/features/pooling/#pool-size. Cassandra 2.0.X falls under protocol V2, Cassandra 2.1+ falls under protocol V3.
-* `cassandra.connecttimeoutmillis`
-* `cassandra.useSSL`
-  * Default value is false.
-  - To connect with SSL set this value to true.
-* `cassandra.readtimeoutmillis`
-  * Defaults for connect and read timeouts can be found here: https://docs.datastax.com/en/drivers/java/2.0/com/datastax/driver/core/SocketOptions.html.
-* `cassandra.tracing`
-  * Default is false
-  * https://docs.datastax.com/en/cql/3.3/cql/cql_reference/tracing_r.html
+- [1]: https://docs.datastax.com/en/developer/java-driver/4.11/manual/core/configuration/
+- [2]: https://docs.datastax.com/en/developer/java-driver/4.2/manual/core/tracing/

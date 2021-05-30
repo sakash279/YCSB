@@ -10,10 +10,15 @@
 package site.ycsb.db;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.InvalidKeyspaceException;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.datastax.oss.driver.api.core.config.DriverOption;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
-import com.datastax.oss.driver.api.core.metadata.Node;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.datastax.oss.driver.api.core.servererrors.AlreadyExistsException;
+import com.datastax.oss.driver.api.core.servererrors.ServerError;
 import com.datastax.oss.driver.api.core.type.DataTypes;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
 import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
@@ -24,7 +29,6 @@ import com.datastax.oss.driver.api.querybuilder.schema.CreateTable;
 import com.datastax.oss.driver.api.querybuilder.schema.Drop;
 import com.datastax.oss.driver.api.querybuilder.select.Select;
 import com.datastax.oss.driver.api.querybuilder.truncate.Truncate;
-import com.datastax.oss.driver.internal.core.context.InternalDriverContext;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
@@ -39,17 +43,14 @@ import site.ycsb.measurements.Measurements;
 import site.ycsb.workloads.CoreWorkload;
 
 import java.io.File;
-import java.net.InetSocketAddress;
-import java.util.Collection;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.insertInto;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.literal;
@@ -59,12 +60,16 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.Assert.fail;
+import static site.ycsb.db.CassandraCQLClientExt.CONFIG_FILE_PROPERTY;
+import static site.ycsb.db.CassandraCQLClientExt.REQUEST_TRACING_PROPERTY;
 import static site.ycsb.db.CassandraCQLClientExt.YCSB_KEY;
 
 /**
- * Integration tests for the Cassandra client
+ * Integration tests for the Cosmos Cassandra API DataStax Java Driver 4 client.
  */
 public class CassandraCQLClientExtTest {
 
@@ -72,19 +77,47 @@ public class CassandraCQLClientExtTest {
 
   @ClassRule
   public static final CassandraUnit cassandraUnit;
-
-  private static final String[] COLUMN_NAMES = { "field0", "field1" };
   private static final String TABLE_NAME;
 
-  private CassandraCQLClientExt client;
-  private CqlSession session;
-
   static {
+
     final UUID id = UUID.randomUUID();
-    TABLE_NAME = "integration_test_" + (id.getLeastSignificantBits() ^ id.getMostSignificantBits());
-    cassandraUnit = new CassandraUnit(getProperty("azure.cosmos.cassandra.config-file"), TABLE_NAME, COLUMN_NAMES);
+
+    TABLE_NAME = "test_" + Long.toUnsignedString(
+        id.getLeastSignificantBits() ^ id.getMostSignificantBits(),
+        Character.MAX_RADIX);
+
+    cassandraUnit = new CassandraUnit(
+        getProperty("azure.cosmos.cassandra.config-file"),
+        TABLE_NAME,
+        new String[] { "field0", "field1", "field2", "field3", "field4", "field5" },
+        Boolean.parseBoolean(getProperty("azure.cosmos.cassandra.request-tracing", "false")));
+
+    // HOCON does not support expansion of arrays from environment variables or system properties. You must add array
+    // elements one-by-one using the syntax illustrated here:
+    //
+    //     preferred-regions += ${?AZURE_COSMOS_CASSANDRA_PREFERRED_REGION_1}
+    //     preferred-regions += ${?AZURE_COSMOS_CASSANDRA_PREFERRED_REGION_2}
+    //     preferred-regions += ${?AZURE_COSMOS_CASSANDRA_PREFERRED_REGION_3}
+    //     ...
+    //
+    // We make that easier by parsing and adding the relevant values as system properties in the code that follows.
+
+    final String preferredRegions = System.getenv("AZURE_COSMOS_CASSANDRA_PREFERRED_REGIONS");
+
+    if (preferredRegions != null) {
+
+      final Map<String, String> environment = System.getenv();
+      int i = 0;
+
+      for (final String preferredRegion : preferredRegions.split("\\s*,\\s*")) {
+        System.setProperty("AZURE_COSMOS_PREFERRED_REGION_" + (++i), preferredRegion);
+      }
+    }
   }
-  
+
+  private CassandraCQLClientExt client;
+
   // endregion
 
   // region Methods
@@ -93,21 +126,35 @@ public class CassandraCQLClientExtTest {
    * Truncates the integration test {@link #TABLE_NAME} so that each test starts fresh.
    */
   @After
-  public void clearTable() {
-    final Truncate truncate = QueryBuilder.truncate(TABLE_NAME);
-    cassandraUnit.getSession().execute(truncate.build());
+  public void clearTable() throws InterruptedException {
+
+    final SimpleStatement truncate = QueryBuilder.truncate(TABLE_NAME).build();
+
+    try {
+
+      final ResultSet resultSet = cassandraUnit.getSession().execute(truncate);
+      assertThat(resultSet.getExecutionInfo().getErrors().size(), is(0));
+
+    } catch (final ServerError error) {
+
+      if (error.getMessage().contains("not supported")) {
+        cassandraUnit.recreateTable();
+      } else {
+        fail(error.toString());
+      }
+
+    } catch (final Throwable error) {
+      fail(error.toString());
+    }
   }
 
   @Before
   public void setUp() throws Exception {
 
-    this.session = cassandraUnit.getSession();
-
     final Properties properties = new Properties();
 
-    properties.setProperty("hosts", cassandraUnit.getHosts().get(0));
-    properties.setProperty("port", Integer.toString(cassandraUnit.getPort()));
-    properties.setProperty("table", cassandraUnit.getTableName());
+    properties.setProperty(CONFIG_FILE_PROPERTY, cassandraUnit.getConfigurationFileName());
+    properties.setProperty(REQUEST_TRACING_PROPERTY, Boolean.toString(cassandraUnit.getRequestTracing()));
 
     Measurements.setProperties(properties);
 
@@ -140,7 +187,7 @@ public class CassandraCQLClientExtTest {
         .where(Relation.column(YCSB_KEY).isEqualTo(literal(YCSB_KEY)))
         .limit(1);
 
-    final ResultSet resultSet = this.session.execute(select.build());
+    final ResultSet resultSet = cassandraUnit.getSession().execute(select.build());
     final Row row = resultSet.one();
 
     assertThat(row, nullValue());
@@ -149,7 +196,7 @@ public class CassandraCQLClientExtTest {
   @Test
   public void testInsert() {
     final String key = "key";
-    final Map<String, String> input = new HashMap<String, String>();
+    final Map<String, String> input = new HashMap<>();
     input.put("field0", "value1");
     input.put("field1", "value2");
 
@@ -162,7 +209,7 @@ public class CassandraCQLClientExtTest {
             .where(Relation.column(YCSB_KEY).isEqualTo(literal(key)))
             .limit(1);
 
-    final ResultSet resultSet = this.session.execute(select.build());
+    final ResultSet resultSet = cassandraUnit.getSession().execute(select.build());
     final Row row = resultSet.one();
 
     assertThat(row, notNullValue());
@@ -172,7 +219,7 @@ public class CassandraCQLClientExtTest {
   }
 
   @Test
-  public void testPreparedStatements() throws Exception {
+  public void testPreparedStatements() {
     final int LOOP_COUNT = 3;
     for (int i = 0; i < LOOP_COUNT; i++) {
       this.testInsert();
@@ -189,29 +236,38 @@ public class CassandraCQLClientExtTest {
 
     this.insertRow();
 
-    final HashMap<String, ByteIterator> result = new HashMap<String, ByteIterator>();
+    final HashMap<String, ByteIterator> result = new HashMap<>();
     final Status status = this.client.read(TABLE_NAME, YCSB_KEY, null, result);
 
     assertThat(status, is(Status.OK));
-    assertThat(result.entrySet(), hasSize(11));
+
+    assertThat(result.entrySet(), hasSize(cassandraUnit.getColumnCount()));
+
+    assertThat(result.get(YCSB_KEY), notNullValue());
+    assertThat(result.get("field0"), notNullValue());
+    assertThat(result.get("field1"), notNullValue());
+
     assertThat(result, hasEntry("field2", null));
+    assertThat(result, hasEntry("field3", null));
+    assertThat(result, hasEntry("field4", null));
+    assertThat(result, hasEntry("field5", null));
 
-    final HashMap<String, String> strResult = new HashMap<String, String>();
+    final HashMap<String, String> namedValues = new HashMap<>();
 
-    for (final Map.Entry<String, ByteIterator> e : result.entrySet()) {
-      if (e.getValue() != null) {
-        strResult.put(e.getKey(), e.getValue().toString());
+    for (final Map.Entry<String, ByteIterator> entry : result.entrySet()) {
+      if (entry.getValue() != null) {
+        namedValues.put(entry.getKey(), entry.getValue().toString());
       }
     }
 
-    assertThat(strResult, hasEntry(YCSB_KEY, YCSB_KEY));
-    assertThat(strResult, hasEntry("field0", "value1"));
-    assertThat(strResult, hasEntry("field1", "value2"));
+    assertThat(namedValues, hasEntry(YCSB_KEY, YCSB_KEY));
+    assertThat(namedValues, hasEntry("field0", "value1"));
+    assertThat(namedValues, hasEntry("field1", "value2"));
   }
 
   @Test
   public void testReadMissingRow() {
-    final HashMap<String, ByteIterator> result = new HashMap<String, ByteIterator>();
+    final HashMap<String, ByteIterator> result = new HashMap<>();
     final Status status = this.client.read(TABLE_NAME, "Missing row", null, result);
     assertThat(result.size(), is(0));
     assertThat(status, is(Status.NOT_FOUND));
@@ -251,7 +307,7 @@ public class CassandraCQLClientExtTest {
             .where(Relation.column(YCSB_KEY).isEqualTo(literal(YCSB_KEY)))
             .limit(1);
 
-    final ResultSet resultSet = this.session.execute(select.build());
+    final ResultSet resultSet = cassandraUnit.getSession().execute(select.build());
     final Row row = resultSet.one();
 
     assertThat(row, notNullValue());
@@ -269,7 +325,7 @@ public class CassandraCQLClientExtTest {
         .value(YCSB_KEY, literal(YCSB_KEY))
         .value("field0", literal("value1"))
         .value("field1", literal("value2"));
-    this.session.execute(insert.build());
+    cassandraUnit.getSession().execute(insert.build());
   }
 
   // endregion
@@ -278,20 +334,38 @@ public class CassandraCQLClientExtTest {
 
     final String[] columnNames;
     final File configurationFile;
+    final boolean requestTracing;
     final String tableName;
     CqlSession session;
 
-    CassandraUnit(final String configurationFileName, final String tableName, final String[] columnNames) {
+    CassandraUnit(
+        final String configurationFileName,
+        final String tableName,
+        final String[] columnNames,
+        final boolean requestTracing) {
 
       requireNonNull(configurationFileName, "expected non-null configurationFileName");
       requireNonNull(configurationFileName, "expected non-null tableName");
 
+      this.configurationFile = new File(configurationFileName);
       this.session = null;
       this.tableName = tableName;
       this.columnNames = columnNames;
-      this.configurationFile = new File(configurationFileName);
+      this.requestTracing = requestTracing;
 
       assertThat(this.configurationFile.exists(), is(true));
+    }
+
+    public int getColumnCount() {
+      return this.columnNames.length + 1;
+    }
+
+    public String getConfigurationFileName() {
+      return this.configurationFile.getPath();
+    }
+
+    public boolean getRequestTracing() {
+      return this.requestTracing;
     }
 
     @Override
@@ -299,9 +373,9 @@ public class CassandraCQLClientExtTest {
       return new Statement() {
         @Override
         public void evaluate() throws Throwable {
-          CassandraUnit.this.before();
           try {
             CassandraUnit.this.before();
+            base.evaluate();
           } finally {
             CassandraUnit.this.after();
           }
@@ -309,18 +383,19 @@ public class CassandraCQLClientExtTest {
       };
     }
 
-    List<String> getHosts() {
-      final Collection<Node> nodes = this.session.getMetadata().getNodes().values();
-      return nodes.stream()
-          .map(node -> getInetSocketAddress(node).getHostName())
-          .collect(Collectors.toList());
-    }
+    public void recreateTable() throws InterruptedException {
 
-    int getPort() {
-      final InternalDriverContext driverContext = (InternalDriverContext) this.session.getContext();
-      final Node node = driverContext.getMetadataManager().getContactPoints().iterator().next();
-      final InetSocketAddress address = getInetSocketAddress(node);
-      return address.getPort();
+      final Drop drop = SchemaBuilder.dropTable(this.tableName).ifExists();
+      this.session.execute(drop.build());
+
+      CreateTable createTable = SchemaBuilder.createTable(this.tableName).withPartitionKey(YCSB_KEY, DataTypes.TEXT);
+
+      for (final String name : this.columnNames) {
+        createTable = createTable.withColumn(name, DataTypes.TEXT);
+      }
+
+      this.session.execute(createTable.build().setTimeout(Duration.ofSeconds(10)));
+      Thread.sleep(2_000L);  // allowing time for the table creation to sync across regions
     }
 
     CqlSession getSession() {
@@ -344,31 +419,76 @@ public class CassandraCQLClientExtTest {
 
       this.after();
 
-      this.session = CqlSession.builder()
-          .withConfigLoader(DriverConfigLoader.fromFile(this.configurationFile))
-          .withApplicationName("ycsb.cassandra.driver-4.integration-test")
-          .withKeyspace("ycsb")
-          .build();
+      final DriverConfigLoader configLoader = DriverConfigLoader.fromFile(this.configurationFile);
+      final String applicationName = "ycsb.cosmos-cassandra-driver-4-binding.integration-test";
+      final DriverOption sessionKeyspaceOption = DefaultDriverOption.SESSION_KEYSPACE;
 
-      final CreateKeyspace createKeyspace = SchemaBuilder.createKeyspace("ycsb").ifNotExists().withSimpleStrategy(4);
-      this.session.execute(createKeyspace.build());
+      final String keyspaceName = configLoader.getInitialConfig()
+          .getDefaultProfile()
+          .getString(DefaultDriverOption.SESSION_KEYSPACE);
 
-      final Drop drop = SchemaBuilder.dropTable(this.tableName).ifExists();
-      this.session.execute(drop.build());
+      assertThat(keyspaceName, notNullValue());
+      assertThat(keyspaceName, not(""));
 
-      CreateTable createTable = SchemaBuilder.createTable(this.tableName).withPartitionKey(YCSB_KEY, DataTypes.TEXT);
+      this.session = null;
 
-      for (final String name : this.columnNames) {
-        createTable = createTable.withColumn(name, DataTypes.TEXT);
+      for (int i = 0; i <= 1; i++) {
+
+        try {
+
+          this.session = CqlSession.builder().withApplicationName(applicationName)
+              .withConfigLoader(configLoader)
+              .build();
+
+          // TODO (DANOBLE) eliminate the need for this workaround
+          //  It happens that after dropping a keyspace, the Cosmos Cassandra API allows us to set the session keyspace
+          //  even though the keyspace no longer exists. More than that this statement will do nothing because--from a
+          //  Cosmos Cassandra API perspective, the keyspace still exists.
+          //  Evidence:
+          //  - The session can be configured with the non-existent keyspace.
+          //        datastax-java-driver.basic.session-keyspace = <non-existent-keyspace-name>
+          //    Expected: Setting session-keyspace to a non-existent keyspace name causes CqlSessionBuilder::build to
+          //    throw an InvalidKeyspaceException.
+          //  - This command does not create a keyspace:
+          //        CREATE KEYSPACE IF NOT EXISTS <non-existent-keyspace-name>
+          //    Expected: A keyspace with the non-existent keyspace name is created.
+          //  Workaround:
+          //  - Try to create the keyspace:
+          //        CREATE KEYSPACE <non-existent-keyspace-name>
+          //  - When the command fails catch and ignore the AlreadyExistsException thrown by CqlSession::execute.
+
+          final SimpleStatement createKeyspace = SchemaBuilder.createKeyspace(keyspaceName)
+              .withSimpleStrategy(4)
+              .build();
+
+          this.session.execute(createKeyspace);
+          break;
+
+        } catch (final InvalidKeyspaceException error) {
+
+          final DriverConfigLoader programmaticConfigLoader = DriverConfigLoader.programmaticBuilder()
+              .withString(sessionKeyspaceOption, "system")
+              .build();
+
+          try (CqlSession session = CqlSession.builder().withApplicationName(applicationName)
+              .withConfigLoader(DriverConfigLoader.compose(programmaticConfigLoader, configLoader))
+              .build()) {
+
+            final SimpleStatement createKeyspace = SchemaBuilder.createKeyspace(keyspaceName)
+                .withSimpleStrategy(4)
+                .build();
+
+            session.execute(createKeyspace);
+          }
+        } catch (final AlreadyExistsException error) {
+          break;
+        } catch (final Throwable error) {
+          fail(error.toString());
+        }
       }
 
-      this.session.execute(createTable.build());
-      Thread.sleep(5_000L);  // allowing time for the table creation to sync across regions
-    }
-
-    private static InetSocketAddress getInetSocketAddress(final Node node) {
-      final InetSocketAddress address = (InetSocketAddress) node.getEndPoint().resolve();
-      return address.isUnresolved() ? address : new InetSocketAddress(address.getHostName(), address.getPort());
+      assertThat(this.session, notNullValue());
+      this.recreateTable();
     }
   }
 }

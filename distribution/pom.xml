@@ -15,7 +15,8 @@ permissions and limitations under the License. See accompanying
 LICENSE file.
 -->
 
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
@@ -88,7 +89,7 @@ LICENSE file.
       <groupId>site.ycsb</groupId>
       <artifactId>couchbase2-binding</artifactId>
       <version>${project.version}</version>
-		</dependency>
+    </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>crail-binding</artifactId>
@@ -189,11 +190,18 @@ LICENSE file.
       <artifactId>maprjsondb-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- 
+      The com.allbank repository is now a blocked mirror because it does not support https.
+      When you build you will see this:
+      Blocked mirror for repositories: [allanbank (http://www.allanbank.com/repo/, default, releases)
+    -->
+    <!--
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>mongodb-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
+    -->
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>nosqldb-binding</artifactId>
@@ -249,26 +257,32 @@ LICENSE file.
       <artifactId>scylla-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- 
+      Depends on a blocked mirror for repositories: [maven-restlet (http://maven.restlet.org, default, r
+      eleases+snapshots), apache.snapshots (http://repository.apache.org/snapshots, default, disabled)]
+    -->
+    <!--
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>solr7-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
+    -->
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>tarantool-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-        <groupId>site.ycsb</groupId>
-        <artifactId>tablestore-binding</artifactId>
-        <version>${project.version}</version>
+      <groupId>site.ycsb</groupId>
+      <artifactId>tablestore-binding</artifactId>
+      <version>${project.version}</version>
     </dependency>
     <dependency>
-       <groupId>site.ycsb</groupId>
-       <artifactId>voltdb-binding</artifactId>
-       <version>${project.version}</version>
-     </dependency>
+      <groupId>site.ycsb</groupId>
+      <artifactId>voltdb-binding</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>zookeeper-binding</artifactId>
