@@ -202,7 +202,7 @@ public class CassandraCQLClientExt extends DB {
 
     try {
 
-      final Set<String> fields = namedValues.keySet();
+      final Set<String> fields = new HashSet<>(namedValues.keySet());
 
       final PreparedStatement statement = INSERT_STATEMENTS.compute(fields, (ignored, prior) -> {
           if (prior != null) {
@@ -215,14 +215,7 @@ public class CassandraCQLClientExt extends DB {
           return session.prepare(insert.setExecutionProfileName(WRITE_PROFILE_NAME).setTracing(tracing));
         });
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("statement: {}, key: {}, values: {}", statement.getQuery(), key, namedValues);
-      }
-
-      // TODO (DANOBLE) verify that the order of namedValues::keySet and namedValues::values are the same
-
-      session.execute(statement.boundStatementBuilder(namedValues.values()).setString(YCSB_KEY, key).build());
-      return Status.OK;
+      return bindAndExecute(statement, key, namedValues);
 
     } catch (final Exception error) {
       LOG.error(MessageFormatter.format("Error inserting key: {}", key).getMessage(), error);
@@ -411,19 +404,31 @@ public class CassandraCQLClientExt extends DB {
           return session.prepare(update.setExecutionProfileName(WRITE_PROFILE_NAME).setTracing(tracing));
         });
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("statement: {}, key: {}, values: {}", statement.getQuery(), key, namedValues);
-      }
-
-      // TODO (DANOBLE) verify that the order of namedValues::keySet and namedValues::values are the same
-
-      session.execute(statement.boundStatementBuilder(namedValues.values()).setString(YCSB_KEY, key).build());
-      return Status.OK;
+      return bindAndExecute(statement, key, namedValues);
 
     } catch (final Exception e) {
       LOG.error(MessageFormatter.format("Error updating key: {}", key).getMessage(), e);
     }
 
     return Status.ERROR;
+  }
+
+  private static Status bindAndExecute(
+      final PreparedStatement statement,
+      final String key,
+      final Map<String, ByteIterator> namedValues) {
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("statement: {}, key: {}, namedValues: {}", statement.getQuery(), key, namedValues);
+    }
+
+    // TODO (DANOBLE) verify that the order of namedValues::keySet and namedValues::values are the same on Java 8
+
+    final Object[] values = namedValues.values().stream()
+        .map(ByteIterator::toString)
+        .toArray();
+
+    session.execute(statement.boundStatementBuilder(values).setString(YCSB_KEY, key).build());
+    return Status.OK;
   }
 }
