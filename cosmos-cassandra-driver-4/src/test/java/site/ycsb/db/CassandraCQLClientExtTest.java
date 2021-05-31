@@ -9,6 +9,7 @@
 
 package site.ycsb.db;
 
+import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.InvalidKeyspaceException;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
@@ -20,6 +21,7 @@ import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.datastax.oss.driver.api.core.servererrors.AlreadyExistsException;
 import com.datastax.oss.driver.api.core.servererrors.ServerError;
 import com.datastax.oss.driver.api.core.type.DataTypes;
+import com.datastax.oss.driver.api.querybuilder.Literal;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
 import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
 import com.datastax.oss.driver.api.querybuilder.insert.Insert;
@@ -28,6 +30,7 @@ import com.datastax.oss.driver.api.querybuilder.schema.CreateKeyspace;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateTable;
 import com.datastax.oss.driver.api.querybuilder.schema.Drop;
 import com.datastax.oss.driver.api.querybuilder.select.Select;
+import com.datastax.oss.driver.api.querybuilder.term.Term;
 import com.datastax.oss.driver.api.querybuilder.truncate.Truncate;
 import org.junit.After;
 import org.junit.Before;
@@ -42,15 +45,19 @@ import site.ycsb.StringByteIterator;
 import site.ycsb.measurements.Measurements;
 import site.ycsb.workloads.CoreWorkload;
 
+import javax.management.Query;
 import java.io.File;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.insertInto;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.literal;
@@ -131,14 +138,25 @@ public class CassandraCQLClientExtTest {
     final SimpleStatement truncate = QueryBuilder.truncate(TABLE_NAME).build();
 
     try {
-
-      final ResultSet resultSet = cassandraUnit.getSession().execute(truncate);
-      assertThat(resultSet.getExecutionInfo().getErrors().size(), is(0));
-
+      cassandraUnit.getSession().execute(truncate);
     } catch (final ServerError error) {
 
       if (error.getMessage().contains("not supported")) {
-        cassandraUnit.recreateTable();
+
+        final SimpleStatement select = QueryBuilder.selectFrom(TABLE_NAME).all().columns(YCSB_KEY).build();
+        final ResultSet resultSet = cassandraUnit.getSession().execute(select);
+        final List<Row> rows = resultSet.all();
+
+        if (!rows.isEmpty()) {
+          final List<Term> keys = rows.stream()
+              .map(row -> (Term) literal(row.getString(0)))
+              .collect(Collectors.toList());
+          final SimpleStatement delete = QueryBuilder.deleteFrom(TABLE_NAME)
+              .where(Relation.column(YCSB_KEY).in(keys))
+              .build();
+          cassandraUnit.getSession().execute(delete);
+        }
+
       } else {
         fail(error.toString());
       }
@@ -321,11 +339,12 @@ public class CassandraCQLClientExtTest {
   // region Privates
 
   private void insertRow() {
-    final Insert insert = insertInto(TABLE_NAME)
+    final SimpleStatement insert = insertInto(TABLE_NAME)
         .value(YCSB_KEY, literal(YCSB_KEY))
         .value("field0", literal("value1"))
-        .value("field1", literal("value2"));
-    cassandraUnit.getSession().execute(insert.build());
+        .value("field1", literal("value2"))
+        .build();
+    cassandraUnit.getSession().execute(insert);
   }
 
   // endregion
