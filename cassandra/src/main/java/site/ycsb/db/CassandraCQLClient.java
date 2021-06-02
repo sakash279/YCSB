@@ -17,17 +17,7 @@
  */
 package site.ycsb.db;
 
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.ColumnDefinitions;
-import com.datastax.driver.core.ConsistencyLevel;
-import com.datastax.driver.core.Host;
-import com.datastax.driver.core.HostDistance;
-import com.datastax.driver.core.Metadata;
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.Row;
-import com.datastax.driver.core.Session;
-import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.BoundStatement;
+import com.datastax.driver.core.*;
 import com.datastax.driver.core.querybuilder.Insert;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Select;
@@ -90,6 +80,10 @@ public class CassandraCQLClient extends DB {
   public static final String KEYSPACE_PROPERTY_DEFAULT = "ycsb";
   public static final String USERNAME_PROPERTY = "cassandra.username";
   public static final String PASSWORD_PROPERTY = "cassandra.password";
+  public static final String TABLE_PROPERTY = "table";
+  public static final String TABLE_PROPERTY_DEFAULT = "usertable";
+  public static final String COSMOSDB_THROUGHPUT_PROPERTY = "cassandra.cosmosdbthroughput";
+  public static final String COSMOSDB_THROUGHPUT_DEFAULT = "6000";
 
   public static final String HOSTS_PROPERTY = "hosts";
   public static final String PORT_PROPERTY = "port";
@@ -116,6 +110,16 @@ public class CassandraCQLClient extends DB {
 
   public static final String USE_SSL_CONNECTION = "cassandra.useSSL";
   private static final String DEFAULT_USE_SSL_CONNECTION = "false";
+
+  /**
+   * The name of the property for the number of fields in a record.
+   */
+  public static final String FIELD_COUNT_PROPERTY = "fieldcount";
+
+  /**
+   * Default number of fields in a record.
+   */
+  public static final String FIELD_COUNT_PROPERTY_DEFAULT = "10";
 
   /**
    * Count the number of times initialized to teardown on the last
@@ -166,6 +170,13 @@ public class CassandraCQLClient extends DB {
 
         String keyspace = getProperties().getProperty(KEYSPACE_PROPERTY,
             KEYSPACE_PROPERTY_DEFAULT);
+        String tableName = getProperties().getProperty(TABLE_PROPERTY,
+            TABLE_PROPERTY_DEFAULT);
+        long fieldCount = Long.parseLong(getProperties().getProperty(
+            FIELD_COUNT_PROPERTY, FIELD_COUNT_PROPERTY_DEFAULT));
+        long cosmosdbThroughput = Long.parseLong(getProperties().getProperty(
+            COSMOSDB_THROUGHPUT_PROPERTY, COSMOSDB_THROUGHPUT_DEFAULT));
+
 
         readConsistencyLevel = ConsistencyLevel.valueOf(
             getProperties().getProperty(READ_CONSISTENCY_LEVEL_PROPERTY,
@@ -229,7 +240,36 @@ public class CassandraCQLClient extends DB {
               discoveredHost.getRack());
         }
 
-        session = cluster.connect(keyspace);
+        session = cluster.connect();
+
+        // initialize keyspace and table
+        //session.execute("DROP KEYSPACE IF EXISTS " + keyspace);
+        //Thread.sleep(5000);
+        session.execute("CREATE KEYSPACE IF NOT EXISTS " + keyspace +
+            " WITH REPLICATION = { 'class' : 'NetworkTopologyStrategy', 'datacenter1' : 1 }");
+        Thread.sleep(5000);
+
+        StringBuilder cassandraTable = new StringBuilder("CREATE TABLE IF NOT EXISTS ");
+        cassandraTable.append(keyspace);
+        cassandraTable.append(".");
+        cassandraTable.append(tableName);
+        cassandraTable.append(" (y_id VARCHAR PRIMARY KEY");
+
+        for (int idx = 0; idx < fieldCount; idx++) {
+          cassandraTable.append(", field");
+          cassandraTable.append(idx);
+          cassandraTable.append(" VARCHAR");
+        }
+        cassandraTable.append(")");
+
+        // skip cosmosDB throughput if using native cassandra
+        if (!port.equals("9042")) {
+          cassandraTable.append(" WITH cosmosdb_provisioned_throughput= " + cosmosdbThroughput);
+        }
+
+        session.execute(cassandraTable.toString());
+
+        session.execute("USE " + keyspace);
 
       } catch (Exception e) {
         throw new DBException(e);
