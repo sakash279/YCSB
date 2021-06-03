@@ -9,7 +9,6 @@
 
 package site.ycsb.db;
 
-import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.InvalidKeyspaceException;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
@@ -21,17 +20,13 @@ import com.datastax.oss.driver.api.core.cql.SimpleStatement;
 import com.datastax.oss.driver.api.core.servererrors.AlreadyExistsException;
 import com.datastax.oss.driver.api.core.servererrors.ServerError;
 import com.datastax.oss.driver.api.core.type.DataTypes;
-import com.datastax.oss.driver.api.querybuilder.Literal;
 import com.datastax.oss.driver.api.querybuilder.QueryBuilder;
 import com.datastax.oss.driver.api.querybuilder.SchemaBuilder;
-import com.datastax.oss.driver.api.querybuilder.insert.Insert;
 import com.datastax.oss.driver.api.querybuilder.relation.Relation;
-import com.datastax.oss.driver.api.querybuilder.schema.CreateKeyspace;
 import com.datastax.oss.driver.api.querybuilder.schema.CreateTable;
 import com.datastax.oss.driver.api.querybuilder.schema.Drop;
 import com.datastax.oss.driver.api.querybuilder.select.Select;
 import com.datastax.oss.driver.api.querybuilder.term.Term;
-import com.datastax.oss.driver.api.querybuilder.truncate.Truncate;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.ClassRule;
@@ -45,7 +40,6 @@ import site.ycsb.StringByteIterator;
 import site.ycsb.measurements.Measurements;
 import site.ycsb.workloads.CoreWorkload;
 
-import javax.management.Query;
 import java.io.File;
 import java.time.Duration;
 import java.util.Collections;
@@ -57,10 +51,10 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.insertInto;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.literal;
+import static java.lang.Character.MAX_RADIX;
 import static java.lang.System.getProperty;
 import static java.util.Objects.requireNonNull;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -90,9 +84,7 @@ public class CassandraCQLClientExtTest {
 
     final UUID id = UUID.randomUUID();
 
-    TABLE_NAME = "test_" + Long.toUnsignedString(
-        id.getLeastSignificantBits() ^ id.getMostSignificantBits(),
-        Character.MAX_RADIX);
+    TABLE_NAME = "test_" + Long.toUnsignedString(id.getLeastSignificantBits() ^ id.getMostSignificantBits(), MAX_RADIX);
 
     cassandraUnit = new CassandraUnit(
         getProperty("azure.cosmos.cassandra.config-file"),
