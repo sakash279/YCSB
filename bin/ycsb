@@ -51,36 +51,37 @@ COMMANDS = {
 }
 
 DATABASES = {
-    "accumulo1.9"     : "site.ycsb.db.accumulo.AccumuloClient",
-    "aerospike"    : "site.ycsb.db.AerospikeClient",
-    "arangodb"     : "site.ycsb.db.arangodb.ArangoDBClient",
-    "arangodb3"     : "site.ycsb.db.arangodb.ArangoDBClient",
-    "asynchbase"   : "site.ycsb.db.AsyncHBaseClient",
-    "azurecosmos" : "site.ycsb.db.AzureCosmosClient",
-    "azuretablestorage" : "site.ycsb.db.azuretablestorage.AzureClient",
-    "basic"        : "site.ycsb.BasicDB",
-    "basicts"      : "site.ycsb.BasicTSDB",
-    "cassandra-cql": "site.ycsb.db.CassandraCQLClient",
-    "cassandra2-cql": "site.ycsb.db.CassandraCQLClient",
-    "cloudspanner" : "site.ycsb.db.cloudspanner.CloudSpannerClient",
-    "couchbase"    : "site.ycsb.db.CouchbaseClient",
-    "couchbase2"   : "site.ycsb.db.couchbase2.Couchbase2Client",
-    "crail"        : "site.ycsb.db.crail.CrailClient",
-    "dynamodb"     : "site.ycsb.db.DynamoDBClient",
-    "elasticsearch": "site.ycsb.db.ElasticsearchClient",
-    "elasticsearch5": "site.ycsb.db.elasticsearch5.ElasticsearchClient",
+    "accumulo1.9"        : "site.ycsb.db.accumulo.AccumuloClient",
+    "aerospike"          : "site.ycsb.db.AerospikeClient",
+    "arangodb"           : "site.ycsb.db.arangodb.ArangoDBClient",
+    "arangodb3"          : "site.ycsb.db.arangodb.ArangoDBClient",
+    "asynchbase"         : "site.ycsb.db.AsyncHBaseClient",
+    "azurecosmos"        : "site.ycsb.db.AzureCosmosClient",
+    "azuretablestorage"  : "site.ycsb.db.azuretablestorage.AzureClient",
+    "basic"              : "site.ycsb.BasicDB",
+    "basicts"            : "site.ycsb.BasicTSDB",
+    "cassandra-cql"      : "site.ycsb.db.CassandraCQLClient",
+    "cassandra-driver-3" : "site.ycsb.db.CassandraDriver3Client",
+    "cassandra-driver-4" : "site.ycsb.db.CassandraDriver4Client",
+    "cloudspanner"       : "site.ycsb.db.cloudspanner.CloudSpannerClient",
+    "couchbase"          : "site.ycsb.db.CouchbaseClient",
+    "couchbase2"         : "site.ycsb.db.couchbase2.Couchbase2Client",
+    "crail"              : "site.ycsb.db.crail.CrailClient",
+    "dynamodb"           : "site.ycsb.db.DynamoDBClient",
+    "elasticsearch"      : "site.ycsb.db.ElasticsearchClient",
+    "elasticsearch5"     : "site.ycsb.db.elasticsearch5.ElasticsearchClient",
     "elasticsearch5-rest": "site.ycsb.db.elasticsearch5.ElasticsearchRestClient",
-    "foundationdb" : "site.ycsb.db.foundationdb.FoundationDBClient",
-    "geode"        : "site.ycsb.db.GeodeClient",
-    "googlebigtable"  : "site.ycsb.db.GoogleBigtableClient",
-    "googledatastore" : "site.ycsb.db.GoogleDatastoreClient",
-    "griddb"       : "site.ycsb.db.griddb.GridDBClient",
-    "hbase1"      : "site.ycsb.db.hbase1.HBaseClient1",
-    "hbase2"      : "site.ycsb.db.hbase2.HBaseClient2",
-    "ignite"       : "site.ycsb.db.ignite.IgniteClient",
-    "ignite-sql"   : "site.ycsb.db.ignite.IgniteSqlClient",
-    "infinispan-cs": "site.ycsb.db.InfinispanRemoteClient",
-    "infinispan"   : "site.ycsb.db.InfinispanClient",
+    "foundationdb"       : "site.ycsb.db.foundationdb.FoundationDBClient",
+    "geode"              : "site.ycsb.db.GeodeClient",
+    "googlebigtable"     : "site.ycsb.db.GoogleBigtableClient",
+    "googledatastore"    : "site.ycsb.db.GoogleDatastoreClient",
+    "griddb"             : "site.ycsb.db.griddb.GridDBClient",
+    "hbase1"             : "site.ycsb.db.hbase1.HBaseClient1",
+    "hbase2"             : "site.ycsb.db.hbase2.HBaseClient2",
+    "ignite"             : "site.ycsb.db.ignite.IgniteClient",
+    "ignite-sql"         : "site.ycsb.db.ignite.IgniteSqlClient",
+    "infinispan-cs"      : "site.ycsb.db.InfinispanRemoteClient",
+    "infinispan"         : "site.ycsb.db.InfinispanClient",
     "jdbc"         : "site.ycsb.db.JdbcDBClient",
     "kudu"         : "site.ycsb.db.KuduYCSBClient",
     "memcached"    : "site.ycsb.db.MemcachedClient",
@@ -257,12 +258,6 @@ def main():
 
     # Classpath set up
     binding = args.database.split("-")[0]
-
-    if binding == "cassandra2":
-        warn("The 'cassandra2-cql' client has been deprecated. It has been "
-             "renamed to simply 'cassandra-cql'. This alias will be removed"
-             " in the next YCSB release.")
-        binding = "cassandra"
 
     if binding == "couchbase":
         warn("The 'couchbase' client has been deprecated. If you are using "

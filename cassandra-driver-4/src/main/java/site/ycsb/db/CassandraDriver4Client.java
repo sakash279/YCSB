@@ -56,7 +56,7 @@ import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.selectFrom;
  * @author David-Noble-at-work
  */
 // TODO (DANOBLE) Add startup and shutdown script support.
-public class CassandraCQLClientExt extends DB {
+public class CassandraDriver4Client extends DB {
 
   public static final String CONFIG_FILE_DEFAULT = "application.conf";
   public static final String CONFIG_FILE_PROPERTY = "cassandra.datastax-java-driver.config-file";
@@ -66,7 +66,7 @@ public class CassandraCQLClientExt extends DB {
 
   public static final String YCSB_KEY = "y_id";
 
-  static final Logger LOG = LoggerFactory.getLogger(CassandraCQLClientExt.class);
+  static final Logger LOG = LoggerFactory.getLogger(CassandraDriver4Client.class);
 
   /**
    * Count the number of times initialized to teardown on the last {@link #cleanup()}.

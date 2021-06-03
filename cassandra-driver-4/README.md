@@ -25,7 +25,7 @@ Binding for [Apache Cassandra](http://cassandra.apache.org), using the CQL API v
 
 - `cassandra.datastax-java-driver.config-file` (**required**)
   - Location of the application configuration file. See [DataStax Java Driver 4 Configuration][1] and `application.conf`
-    in the `cosmos-cassandra-driver-4-binding` sources for the settings that you must provide.
+    in the `cassandra-driver-4-binding` sources for the settings that you must provide.
   - Default: `application.conf`.
   
 - `cassandra.datastax-java-driver.request-tracing` (**&optional**)

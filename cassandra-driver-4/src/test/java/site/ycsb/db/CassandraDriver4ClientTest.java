@@ -65,14 +65,14 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.Assert.fail;
-import static site.ycsb.db.CassandraCQLClientExt.CONFIG_FILE_PROPERTY;
-import static site.ycsb.db.CassandraCQLClientExt.REQUEST_TRACING_PROPERTY;
-import static site.ycsb.db.CassandraCQLClientExt.YCSB_KEY;
+import static site.ycsb.db.CassandraDriver4Client.CONFIG_FILE_PROPERTY;
+import static site.ycsb.db.CassandraDriver4Client.REQUEST_TRACING_PROPERTY;
+import static site.ycsb.db.CassandraDriver4Client.YCSB_KEY;
 
 /**
  * Integration tests for the Cosmos Cassandra API DataStax Java Driver 4 client.
  */
-public class CassandraCQLClientExtTest {
+public class CassandraDriver4ClientTest {
 
   // region Fields
 
@@ -115,7 +115,7 @@ public class CassandraCQLClientExtTest {
     }
   }
 
-  private CassandraCQLClientExt client;
+  private CassandraDriver4Client client;
 
   // endregion
 
@@ -171,7 +171,7 @@ public class CassandraCQLClientExtTest {
     final CoreWorkload workload = new CoreWorkload();
     workload.init(properties);
 
-    this.client = new CassandraCQLClientExt();
+    this.client = new CassandraDriver4Client();
     this.client.setProperties(properties);
     this.client.init();
   }
@@ -431,7 +431,7 @@ public class CassandraCQLClientExtTest {
       this.after();
 
       final DriverConfigLoader configLoader = DriverConfigLoader.fromFile(this.configurationFile);
-      final String applicationName = "ycsb.cosmos-cassandra-driver-4-binding.integration-test";
+      final String applicationName = "ycsb.cassandra-driver-4-binding.integration-test";
       final DriverOption sessionKeyspaceOption = DefaultDriverOption.SESSION_KEYSPACE;
 
       final String keyspaceName = configLoader.getInitialConfig()

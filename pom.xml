@@ -166,9 +166,9 @@ LICENSE file.
     <module>azurecosmos</module>
     <module>azuretablestorage</module>
     <module>cassandra</module>
-    <module>cassandra-cosmosv3</module>
+    <module>cassandra-driver-3</module>
+    <module>cassandra-driver-4</module>
     <module>cloudspanner</module>
-    <module>cosmos-cassandra-driver-4</module>
     <module>couchbase</module>
     <module>couchbase2</module>
     <module>crail</module>

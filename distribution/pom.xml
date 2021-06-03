@@ -67,17 +67,17 @@ LICENSE file.
     </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
-      <artifactId>cassandra-cosmosv3-binding</artifactId>
+      <artifactId>cassandra-driver-3-binding</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>site.ycsb</groupId>
+      <artifactId>cassandra-driver-4-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>site.ycsb</groupId>
       <artifactId>cloudspanner-binding</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>site.ycsb</groupId>
-      <artifactId>cosmos-cassandra-driver-4-binding</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>

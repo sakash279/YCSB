@@ -61,9 +61,10 @@ import org.slf4j.helpers.MessageFormatter;
  *
  * @author cmatser
  */
-public class CassandraCQLClientExt extends DB {
+public class CassandraDriver3Client
+    extends DB {
 
-  private static Logger logger = LoggerFactory.getLogger(CassandraCQLClientExt.class);
+  private static Logger logger = LoggerFactory.getLogger(CassandraDriver3Client.class);
 
   private static Cluster cluster = null;
   private static Session session = null;
@@ -156,7 +157,7 @@ public class CassandraCQLClientExt extends DB {
         String host = getProperties().getProperty(HOSTS_PROPERTY);
         if (host == null) {
           throw new DBException(String.format(
-              "Required property \"%s\" missing for CassandraCQLClient",
+              "Required property \"%s\" missing for CassandraDriver3Client",
               HOSTS_PROPERTY));
         }
         String[] hosts = host.split(",");

@@ -27,8 +27,8 @@ LICENSE file.
     <relativePath>../binding-parent</relativePath>
   </parent>
 
-  <artifactId>cassandra-cosmosv3-binding</artifactId>
-  <name>Cassandra CosmosDB V3 extensions 2.1+ DB Binding</name>
+  <artifactId>cassandra-driver-3-binding</artifactId>
+  <name>Cassandra driver-3 with Cosmos DB extensions binding</name>
   <packaging>jar</packaging>
 
   <properties>

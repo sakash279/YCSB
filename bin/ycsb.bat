@@ -117,12 +117,6 @@ GOTO confAdded
 SET CLASSPATH=%YCSB_HOME%\conf
 :confAdded
 
-@REM Cassandra2 deprecation message
-IF NOT "%BINDING_DIR%" == "cassandra2" GOTO notAliasCassandra
-echo [WARN] The 'cassandra2-cql' client has been deprecated. It has been renamed to simply 'cassandra-cql'. This alias will be removed in the next YCSB release.
-SET BINDING_DIR=cassandra
-:notAliasCassandra
-
 @REM hbase14 replaced with hbase1
 IF NOT "%BINDING_DIR%" == "hbase14" GOTO notAliasHBase14
 echo [WARN] The 'hbase14' client has been deprecated. HBase 1.y users should rely on the 'hbase1' client instead.

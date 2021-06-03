@@ -54,7 +54,7 @@ import java.util.Set;
 /**
  * Integration tests for the Cassandra client
  */
-public class CassandraCQLClientExtTest {
+public class CassandraDriver3ClientTest {
   // Change the default Cassandra timeout from 10s to 120s for slow CI machines
   private final static long timeout = 120000L;
 
@@ -63,7 +63,7 @@ public class CassandraCQLClientExtTest {
   private final static int PORT = 9142;
   private final static String DEFAULT_ROW_KEY = "user1";
 
-  private CassandraCQLClientExt client;
+  private CassandraDriver3Client client;
   private Session session;
 
   @ClassRule
@@ -82,7 +82,7 @@ public class CassandraCQLClientExtTest {
     Measurements.setProperties(p);
     final CoreWorkload workload = new CoreWorkload();
     workload.init(p);
-    client = new CassandraCQLClientExt();
+    client = new CassandraDriver3Client();
     client.setProperties(p);
     client.init();
   }
@@ -115,7 +115,7 @@ public class CassandraCQLClientExtTest {
   private void insertRow() {
     final String rowKey = DEFAULT_ROW_KEY;
     Insert insertStmt = QueryBuilder.insertInto(TABLE);
-    insertStmt.value(CassandraCQLClientExt.YCSB_KEY, rowKey);
+    insertStmt.value(CassandraDriver3Client.YCSB_KEY, rowKey);
 
     insertStmt.value("field0", "value1");
     insertStmt.value("field1", "value2");
@@ -138,7 +138,7 @@ public class CassandraCQLClientExtTest {
         strResult.put(e.getKey(), e.getValue().toString());
       }
     }
-    assertThat(strResult, hasEntry(CassandraCQLClientExt.YCSB_KEY, DEFAULT_ROW_KEY));
+    assertThat(strResult, hasEntry(CassandraDriver3Client.YCSB_KEY, DEFAULT_ROW_KEY));
     assertThat(strResult, hasEntry("field0", "value1"));
     assertThat(strResult, hasEntry("field1", "value2"));
   }
@@ -169,7 +169,7 @@ public class CassandraCQLClientExtTest {
     final Select selectStmt =
         QueryBuilder.select("field0", "field1")
             .from(TABLE)
-            .where(QueryBuilder.eq(CassandraCQLClientExt.YCSB_KEY, key))
+            .where(QueryBuilder.eq(CassandraDriver3Client.YCSB_KEY, key))
             .limit(1);
 
     final ResultSet rs = session.execute(selectStmt);
@@ -196,7 +196,7 @@ public class CassandraCQLClientExtTest {
     final Select selectStmt =
         QueryBuilder.select("field0", "field1")
             .from(TABLE)
-            .where(QueryBuilder.eq(CassandraCQLClientExt.YCSB_KEY, DEFAULT_ROW_KEY))
+            .where(QueryBuilder.eq(CassandraDriver3Client.YCSB_KEY, DEFAULT_ROW_KEY))
             .limit(1);
 
     final ResultSet rs = session.execute(selectStmt);
@@ -218,7 +218,7 @@ public class CassandraCQLClientExtTest {
     final Select selectStmt =
         QueryBuilder.select("field0", "field1")
             .from(TABLE)
-            .where(QueryBuilder.eq(CassandraCQLClientExt.YCSB_KEY, DEFAULT_ROW_KEY))
+            .where(QueryBuilder.eq(CassandraDriver3Client.YCSB_KEY, DEFAULT_ROW_KEY))
             .limit(1);
 
     final ResultSet rs = session.execute(selectStmt);
